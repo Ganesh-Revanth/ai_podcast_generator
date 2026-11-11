@@ -68,6 +68,17 @@ npm run dev
 ```
 The frontend will be available at `http://localhost:5173`.
 
+## Features
+- **Monologue & Dialogue Formats**: Choose between a solo news anchor or an engaging two-host conversational discussion with strict JSON dialogue generation.
+- **Dual-Host Audio Synthesis & Stitching**: High quality dual voice acting with Edge-TTS, 400ms natural transitions, retry backoff, and intro/outro music branding.
+- **Recurring Shows & Automation**: Create automated shows tied to specific news outlets and categories with APScheduler background jobs (daily, hourly, or cron).
+- **Target Minutes Pacing**: Dynamically scales story counts and word budgets (~140 WPM) to meet 2 to 20 minute target episode durations.
+- **Modern Glassmorphic UI**: Dashboard, Studio Generator, Library Player with live audio playback, and a dedicated Shows management panel.
+
 ## Architecture Overview
-- **Backend Services**: Located in `backend/app/services`. `news_service.py` handles fetching RSS feeds. `ai_service.py` talks to the LLM to write the podcast script. `tts_service.py` converts the text to a `.mp3` using Microsoft Edge's free TTS engine.
-- **Frontend Layout**: The UI uses a modern sidebar layout with dynamic glowing backgrounds, glass-morphism panels, and Tailwind animations to feel premium and responsive.
+- **Backend Services**:
+  - `news_service.py`: Fetches and stores articles from RSS outlets.
+  - `ai_service.py`: Generates monologue and strict JSON dialogue scripts with dynamic length budgets.
+  - `tts_service.py`: Converts text to audio via Edge-TTS and stitches dialogue turns and music branding with `pydub`.
+  - `scheduler_service.py`: Manages automated episode generation with `APScheduler`.
+- **Frontend Layout**: Modern sidebar layout (`App.jsx`) with dynamic glowing backgrounds, glass-morphism panels, and Tailwind animations covering Dashboard, Generator Studio, Shows Automation, and Player Library.
