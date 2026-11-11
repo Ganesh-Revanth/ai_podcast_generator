@@ -86,14 +86,14 @@ const SynchronizedTranscript = ({ episode, currentTime = 0, onSeek }) => {
 
   if (!segments.length) {
     return (
-      <div className="p-8 text-center text-gray-400 text-sm">
+      <div className="p-8 text-center text-[#737373] text-xs">
         No transcript data available for this episode.
       </div>
     );
   }
 
   return (
-    <div className="space-y-3 p-4 max-h-[460px] overflow-y-auto pr-2 custom-scrollbar">
+    <div className="space-y-2.5 p-2 max-h-[440px] overflow-y-auto pr-2 custom-scrollbar">
       {segments.map((seg, idx) => {
         const isActive = idx === activeIndex;
         const isSpeakerA = seg.speaker.includes('A');
@@ -104,22 +104,22 @@ const SynchronizedTranscript = ({ episode, currentTime = 0, onSeek }) => {
             key={idx}
             ref={isActive ? activeItemRef : null}
             onClick={() => onSeek && onSeek(seg.start)}
-            className={`p-3.5 rounded-2xl border transition-all duration-300 cursor-pointer group flex gap-3.5 items-start ${
+            className={`p-3 rounded-xl border transition-colors cursor-pointer group flex gap-3 items-start ${
               isActive
-                ? 'bg-primary/20 border-primary text-white shadow-[0_0_20px_rgba(59,130,246,0.3)] ring-1 ring-primary/50'
-                : 'bg-white/5 border-white/5 text-gray-300 hover:bg-white/10 hover:border-white/15 hover:text-white'
+                ? 'bg-white/[0.07] border-white text-white shadow-sm'
+                : 'bg-white/[0.02] border-white/5 text-[#a3a3a3] hover:bg-white/[0.04] hover:border-white/10 hover:text-white'
             }`}
           >
             {/* Timestamp & Play Icon */}
             <div className="flex flex-col items-center flex-shrink-0 pt-0.5">
               <span
-                className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-md border flex items-center gap-1 ${
+                className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border flex items-center gap-1 transition-colors ${
                   isActive
-                    ? 'bg-primary text-white border-primary shadow-sm'
-                    : 'bg-black/30 border-white/10 text-gray-400 group-hover:text-primary group-hover:border-primary/40'
+                    ? 'bg-white text-[#0a0a0a] border-white'
+                    : 'bg-white/5 border-white/10 text-[#737373] group-hover:text-white group-hover:border-white/20'
                 }`}
               >
-                <Play size={10} className={isActive ? 'fill-white' : 'group-hover:fill-primary'} />
+                <Play size={9} className={isActive ? 'fill-[#0a0a0a] text-[#0a0a0a]' : 'group-hover:fill-white text-transparent'} />
                 {formatTime(seg.start)}
               </span>
             </div>
@@ -127,26 +127,19 @@ const SynchronizedTranscript = ({ episode, currentTime = 0, onSeek }) => {
             {/* Turn Content */}
             <div className="flex-1 space-y-1">
               <div className="flex items-center gap-2">
-                <span
-                  className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border tracking-wider flex items-center gap-1 ${
-                    isSpeakerA
-                      ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'
-                      : isSpeakerB
-                      ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
-                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                  }`}
-                >
+                <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full border border-white/10 bg-white/5 text-[#a3a3a3] tracking-wider flex items-center gap-1">
                   {isSpeakerA || isSpeakerB ? <Users size={10} /> : <User size={10} />}
                   {seg.speaker}
                 </span>
                 {isActive && (
-                  <span className="text-[10px] text-primary font-bold animate-pulse">
-                    ● Speaking now
+                  <span className="text-[10px] text-white font-medium flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
+                    Speaking now
                   </span>
                 )}
               </div>
 
-              <p className={`text-sm leading-relaxed ${isActive ? 'font-medium text-white' : 'text-gray-300'}`}>
+              <p className={`text-xs leading-relaxed ${isActive ? 'font-medium text-[#fafafa]' : 'text-[#a3a3a3]'}`}>
                 {seg.text}
               </p>
             </div>

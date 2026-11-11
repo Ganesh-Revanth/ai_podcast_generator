@@ -70,3 +70,4 @@ class PipelineEventManager:
         self._subscribers.pop(episode_id, None)
 
 pipeline_events = PipelineEventManager()
+

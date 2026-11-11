@@ -27,7 +27,6 @@ import {
   getHostPairs,
   getShowFeedUrl
 } from '../services/api';
-import { useNavigate } from 'react-router-dom';
 
 const SCHEDULE_PRESETS = [
   { label: 'Daily at 08:00 AM UTC (Morning)', value: 'daily:08:00' },
@@ -47,7 +46,6 @@ const TONE_OPTIONS = [
 ];
 
 const Shows = () => {
-  const navigate = useNavigate();
   const [shows, setShows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -107,8 +105,8 @@ const Shows = () => {
       setVoices(voicesRes.data || []);
       setHostPairs(pairsRes.data || []);
     } catch (err) {
-      console.error('Failed to load shows:', err);
-      setError('Could not load shows. Please ensure the backend is running.');
+      console.error('Failed to load shows data', err);
+      setError('Failed to fetch shows and configuration options.');
     } finally {
       setLoading(false);
     }
@@ -130,7 +128,7 @@ const Shows = () => {
       name: '',
       description: '',
       source_id: sources[0]?.id || 'the_hindu',
-      category: sources[0]?.categories[0]?.id || 'national',
+      category: sources[0]?.categories?.[0]?.id || 'national',
       topics: '',
       tone: 'professional',
       format: 'monologue',
@@ -146,16 +144,15 @@ const Shows = () => {
 
   const handleOpenEdit = (show) => {
     setEditingShow(show);
-    const isPreset = SCHEDULE_PRESETS.some(p => p.value === show.schedule);
-    setIsCustomSchedule(!isPreset);
-    if (!isPreset) {
-      setCustomScheduleInput(show.schedule || '0 8 * * *');
-    }
+    const isCustom = !SCHEDULE_PRESETS.some(p => p.value === show.schedule);
+    setIsCustomSchedule(isCustom);
+    if (isCustom) setCustomScheduleInput(show.schedule);
+
     setFormData({
-      name: show.name || '',
+      name: show.name,
       description: show.description || '',
-      source_id: show.source_id || 'the_hindu',
-      category: show.category || 'national',
+      source_id: show.source_id,
+      category: show.category,
       topics: show.topics || '',
       tone: show.tone || 'professional',
       format: show.format || 'monologue',
@@ -179,8 +176,8 @@ const Shows = () => {
     try {
       const payload = {
         ...formData,
-        target_minutes: parseInt(formData.target_minutes, 10) || 5,
         schedule: isCustomSchedule ? customScheduleInput : formData.schedule,
+        target_minutes: parseInt(formData.target_minutes, 10),
       };
 
       if (editingShow) {
@@ -188,59 +185,64 @@ const Shows = () => {
         showNotification(`Show "${payload.name}" updated successfully.`);
       } else {
         await createShow(payload);
-        showNotification(`Show "${payload.name}" created successfully.`);
+        showNotification(`Show "${payload.name}" created and scheduled.`);
       }
-      setIsModalOpen(false);
+      handleCloseModal();
       loadAll();
     } catch (err) {
-      console.error('Failed to save show:', err);
-      alert('Failed to save show. Please verify all fields.');
+      console.error('Failed to save show', err);
+      alert(err.response?.data?.detail || 'Failed to save show configuration.');
     }
   };
 
-  const handleToggle = async (id, currentName) => {
+  const handleToggle = async (showId, showName) => {
     try {
-      const res = await toggleShow(id);
-      const updated = res.data;
-      setShows(shows.map(s => s.id === id ? updated : s));
-      showNotification(`Show "${currentName}" is now ${updated.enabled ? 'Enabled' : 'Disabled'}.`);
+      const res = await toggleShow(showId);
+      const stateStr = res.data?.enabled ? 'enabled' : 'paused';
+      showNotification(`Show "${showName}" is now ${stateStr}.`);
+      setShows(prev => prev.map(s => s.id === showId ? { ...s, enabled: res.data.enabled } : s));
     } catch (err) {
-      console.error('Failed to toggle show:', err);
-      alert('Could not update show status.');
+      console.error('Failed to toggle show', err);
+      alert('Failed to change show status.');
     }
   };
 
-  const handleDelete = async (id, name) => {
-    if (!window.confirm(`Are you sure you want to delete the show "${name}"? Associated episodes will be deleted.`)) {
-      return;
-    }
+  const handleRunNow = async (showId, showName) => {
     try {
-      await deleteShow(id);
-      setShows(shows.filter(s => s.id !== id));
-      showNotification(`Show "${name}" was deleted.`);
+      setRunningShowId(showId);
+      showNotification(`Generating scheduled episode for "${showName}"...`);
+      await runShow(showId);
+      showNotification(`Episode for "${showName}" generated successfully! Check the History tab.`);
+      loadAll();
     } catch (err) {
-      console.error('Failed to delete show:', err);
-      alert('Could not delete show.');
-    }
-  };
-
-  const handleRunNow = async (id, name) => {
-    try {
-      setRunningShowId(id);
-      await runShow(id);
-      showNotification(`Generation started for "${name}". Redirecting to history...`);
-      setTimeout(() => {
-        navigate('/history');
-      }, 1500);
-    } catch (err) {
-      console.error('Failed to trigger run now:', err);
-      alert('Failed to trigger generation. Check backend logs.');
+      console.error('Failed to run show', err);
+      alert(err.response?.data?.detail || 'Failed to trigger episode generation.');
+    } finally {
       setRunningShowId(null);
     }
   };
 
-  const selectedSourceObj = sources.find(s => s.id === formData.source_id);
-  const availableCategories = selectedSourceObj ? selectedSourceObj.categories : [];
+  const handleDelete = async (showId, showName) => {
+    if (!window.confirm(`Are you sure you want to delete the show "${showName}"? This will remove its schedule.`)) {
+      return;
+    }
+    try {
+      await deleteShow(showId);
+      showNotification(`Show "${showName}" was deleted.`);
+      setShows(prev => prev.filter(s => s.id !== showId));
+    } catch (err) {
+      console.error('Failed to delete show', err);
+      alert('Failed to delete show.');
+    }
+  };
+
+  const activeSourceObj = sources.find(s => s.id === formData.source_id);
+  const availableCategories = activeSourceObj?.categories || [
+    { id: 'national', name: 'National' },
+    { id: 'business', name: 'Business' },
+    { id: 'technology', name: 'Technology' },
+    { id: 'science', name: 'Science' },
+  ];
 
   const handleSelectHostPair = (pairId) => {
     const pair = hostPairs.find(p => p.id === pairId);
@@ -248,13 +250,13 @@ const Shows = () => {
       setFormData(prev => ({
         ...prev,
         voice_a: pair.voice_a,
-        voice_b: pair.voice_b
+        voice_b: pair.voice_b,
       }));
     }
   };
 
   const formatScheduleLabel = (sched) => {
-    if (!sched) return 'No schedule set';
+    if (!sched) return 'Daily';
     if (sched === 'daily:08:00') return 'Daily at 08:00 AM UTC';
     if (sched === 'daily:12:00') return 'Daily at 12:00 PM UTC';
     if (sched === 'daily:18:00') return 'Daily at 06:00 PM UTC';
@@ -276,31 +278,33 @@ const Shows = () => {
       <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-4">
         <div>
           <div className="flex items-center gap-3 mb-2">
-            <div className="p-2.5 bg-gradient-to-br from-primary to-accent rounded-xl shadow-lg shadow-primary/20 text-white">
-              <Radio size={24} />
+            <div className="w-10 h-10 rounded-xl bg-white text-[#0a0a0a] flex items-center justify-center shadow-sm">
+              <Radio size={20} />
             </div>
-            <h1 className="text-4xl font-extrabold text-white tracking-tight">Recurring Shows</h1>
+            <h1 className="text-3xl sm:text-4xl font-extrabold text-[#fafafa] tracking-tight">Recurring Shows</h1>
           </div>
-          <p className="text-gray-400 text-lg">
+          <p className="text-[#a3a3a3] text-base">
             Create scheduled podcast programs that automatically generate fresh episodes from your chosen sources.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           <button 
+            type="button"
             onClick={loadAll}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 hover:bg-white/5 text-gray-300 font-medium transition-all"
+            className="btn-secondary py-2 px-3.5 text-xs font-semibold flex items-center gap-2 cursor-pointer"
             title="Refresh Shows"
           >
-            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             Refresh
           </button>
           
           <button 
+            type="button"
             onClick={handleOpenCreate}
-            className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white font-semibold rounded-xl shadow-lg shadow-primary/25 transition-all cursor-pointer"
+            className="btn-primary py-2 px-4 text-xs font-semibold rounded-xl flex items-center gap-2 cursor-pointer"
           >
-            <Plus size={20} />
+            <Plus size={16} />
             Create Show
           </button>
         </div>
@@ -308,15 +312,15 @@ const Shows = () => {
 
       {/* Notifications */}
       {successMessage && (
-        <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 animate-fade-in">
-          <CheckCircle2 size={20} />
+        <div className="flex items-center gap-3 p-3.5 rounded-xl bg-white/[0.04] border border-white/10 text-white animate-fade-in text-xs font-medium">
+          <CheckCircle2 size={16} className="text-[#4ade80]" />
           <span>{successMessage}</span>
         </div>
       )}
 
       {error && (
-        <div className="flex items-center gap-3 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 animate-fade-in">
-          <AlertCircle size={20} />
+        <div className="flex items-center gap-3 p-3.5 rounded-xl bg-white/[0.04] border border-white/10 text-white animate-fade-in text-xs font-medium">
+          <AlertCircle size={16} className="text-[#f87171]" />
           <span>{error}</span>
         </div>
       )}
@@ -326,28 +330,29 @@ const Shows = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {[1, 2, 3].map(i => (
             <div key={i} className="glass-panel p-6 rounded-2xl animate-pulse space-y-4">
-              <div className="h-6 bg-white/10 rounded w-3/4"></div>
-              <div className="h-4 bg-white/10 rounded w-1/2"></div>
-              <div className="h-20 bg-white/5 rounded"></div>
+              <div className="h-5 bg-white/10 rounded w-3/4"></div>
+              <div className="h-3 bg-white/10 rounded w-1/2"></div>
+              <div className="h-16 bg-white/5 rounded"></div>
             </div>
           ))}
         </div>
       ) : shows.length === 0 ? (
-        <div className="glass-panel p-12 text-center rounded-3xl border border-white/10 space-y-5 max-w-xl mx-auto my-12">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-primary/20 flex items-center justify-center text-primary">
-            <Radio size={32} />
+        <div className="glass-panel p-12 text-center rounded-3xl border border-white/[0.08] space-y-5 max-w-xl mx-auto my-12">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-white">
+            <Radio size={28} />
           </div>
-          <div className="space-y-2">
-            <h3 className="text-xl font-bold text-white">No Shows Created Yet</h3>
-            <p className="text-gray-400 text-sm">
+          <div className="space-y-1.5">
+            <h3 className="text-lg font-bold text-[#fafafa]">No Shows Created Yet</h3>
+            <p className="text-[#a3a3a3] text-xs max-w-sm mx-auto leading-relaxed">
               Shows allow you to automate episodes on a daily or hourly cadence with customized voices, story counts, and formats.
             </p>
           </div>
           <button
+            type="button"
             onClick={handleOpenCreate}
-            className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white font-semibold rounded-xl shadow-lg shadow-primary/25 transition-all cursor-pointer"
+            className="btn-primary py-2 px-5 text-xs font-semibold rounded-xl inline-flex items-center gap-2 cursor-pointer"
           >
-            <Plus size={20} />
+            <Plus size={16} />
             Create Your First Show
           </button>
         </div>
@@ -362,94 +367,92 @@ const Shows = () => {
             return (
               <div 
                 key={show.id} 
-                className={`glass-panel p-6 rounded-2xl flex flex-col justify-between border transition-all duration-300 relative group ${
+                className={`glass-panel p-6 rounded-2xl flex flex-col justify-between border transition-colors relative group ${
                   show.enabled 
-                    ? 'border-white/15 hover:border-primary/40 shadow-lg' 
-                    : 'border-white/5 opacity-70 hover:opacity-90'
+                    ? 'border-white/[0.10] hover:border-white/[0.20]' 
+                    : 'border-white/5 opacity-60'
                 }`}
               >
                 <div>
                   {/* Top Bar: Format badge & Switch */}
                   <div className="flex items-center justify-between gap-2 mb-4">
                     <div className="flex items-center gap-2">
-                      <span className={`px-2.5 py-1 text-xs font-semibold rounded-lg flex items-center gap-1.5 ${
-                        isDialogue 
-                          ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' 
-                          : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                      }`}>
-                        {isDialogue ? <Users size={12} /> : <User size={12} />}
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border border-white/10 bg-white/5 text-[#a3a3a3] flex items-center gap-1.5">
+                        {isDialogue ? <Users size={11} /> : <User size={11} />}
                         {isDialogue ? 'Dialogue' : 'Monologue'}
                       </span>
                       
-                      <span className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-white/10 text-gray-300 border border-white/10">
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border border-white/10 bg-white/5 text-[#a3a3a3]">
                         {show.target_minutes || 5} min
                       </span>
                     </div>
 
                     {/* Enable Toggle Switch */}
                     <button
+                      type="button"
                       onClick={() => handleToggle(show.id, show.name)}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none cursor-pointer ${
-                        show.enabled ? 'bg-primary' : 'bg-gray-700'
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none cursor-pointer ${
+                        show.enabled ? 'bg-white' : 'bg-[#262626]'
                       }`}
                       title={show.enabled ? 'Click to Disable' : 'Click to Enable'}
                     >
                       <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                          show.enabled ? 'translate-x-6' : 'translate-x-1'
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full transition-transform ${
+                          show.enabled ? 'translate-x-4 bg-[#0a0a0a]' : 'translate-x-0.5 bg-white/60'
                         }`}
                       />
                     </button>
                   </div>
 
                   {/* Show Title & Description */}
-                  <h3 className="text-xl font-bold text-white group-hover:text-primary transition-colors line-clamp-1 mb-1">
+                  <h3 className="text-base font-bold text-[#fafafa] group-hover:text-white transition-colors line-clamp-1 mb-1 tracking-tight">
                     {show.name}
                   </h3>
-                  <p className="text-gray-400 text-xs line-clamp-2 mb-4 min-h-[32px]">
+                  <p className="text-[#a3a3a3] text-xs line-clamp-2 mb-4 min-h-[32px] leading-relaxed">
                     {show.description || 'No description provided.'}
                   </p>
 
                   {/* Metadata Chips */}
-                  <div className="space-y-2 py-3 border-y border-white/5 text-xs text-gray-300">
+                  <div className="space-y-2 py-3 border-y border-white/[0.06] text-xs text-[#a3a3a3]">
                     <div className="flex items-center gap-2">
-                      <span className="text-gray-500 w-16">Source:</span>
+                      <span className="text-[#737373] w-16">Source:</span>
                       <span className="font-medium text-white capitalize">
                         {show.source_id?.replace(/_/g, ' ')} • {show.category}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="text-gray-500 w-16">Schedule:</span>
-                      <span className="flex items-center gap-1 text-accent font-medium">
-                        <Clock size={12} />
+                      <span className="text-[#737373] w-16">Schedule:</span>
+                      <span className="flex items-center gap-1 text-white font-medium">
+                        <Clock size={12} className="text-[#737373]" />
                         {formatScheduleLabel(show.schedule)}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="text-gray-500 w-16">Pacing:</span>
+                      <span className="text-[#737373] w-16">Pacing:</span>
                       <span>~{wordBudget} words (~{approxStories} stories)</span>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="text-gray-500 w-16">Episodes:</span>
-                      <span className="text-gray-200 font-semibold">{show.episode_count || 0} generated</span>
+                      <span className="text-[#737373] w-16">Episodes:</span>
+                      <span className="text-[#fafafa] font-semibold">{show.episode_count || 0} generated</span>
                     </div>
                   </div>
                 </div>
 
                 {/* Footer Controls */}
-                <div className="mt-5 pt-3 flex items-center justify-between gap-2">
+                <div className="mt-5 pt-3 flex items-center justify-between gap-2 border-t border-white/[0.06]">
                   <button
+                    type="button"
                     onClick={() => handleRunNow(show.id, show.name)}
                     disabled={isRunning}
-                    className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 font-medium text-xs transition-all cursor-pointer disabled:opacity-50"
+                    className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-white hover:bg-[#e5e5e5] text-[#0a0a0a] font-semibold text-xs transition-colors cursor-pointer disabled:opacity-50"
                   >
                     {isRunning ? (
-                      <RefreshCw size={14} className="animate-spin" />
+                      <RefreshCw size={13} className="animate-spin text-black" />
                     ) : (
-                      <Play size={14} className="fill-current" />
+                      <Play size={13} className="fill-current" />
                     )}
                     {isRunning ? 'Starting...' : 'Run Now'}
                   </button>
@@ -457,26 +460,28 @@ const Shows = () => {
                   <button
                     type="button"
                     onClick={() => handleCopyFeed(show.id)}
-                    className="p-2 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/20 transition-colors cursor-pointer"
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/10 transition-colors cursor-pointer"
                     title={copiedShowId === show.id ? 'Copied RSS Feed URL!' : 'Copy Apple Podcasts / RSS Feed URL'}
                   >
-                    {copiedShowId === show.id ? <Check size={15} className="text-emerald-400" /> : <Rss size={15} />}
+                    {copiedShowId === show.id ? <Check size={14} className="text-white" /> : <Rss size={14} />}
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => handleOpenEdit(show)}
-                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 transition-colors"
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-[#a3a3a3] hover:text-white border border-white/10 transition-colors cursor-pointer"
                     title="Edit Show"
                   >
-                    <Settings size={15} />
+                    <Settings size={14} />
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => handleDelete(show.id, show.name)}
-                    className="p-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 transition-colors"
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-[#737373] hover:text-[#f87171] border border-white/10 transition-colors cursor-pointer"
                     title="Delete Show"
                   >
-                    <Trash2 size={15} />
+                    <Trash2 size={14} />
                   </button>
                 </div>
               </div>
@@ -487,28 +492,29 @@ const Shows = () => {
 
       {/* CREATE / EDIT MODAL */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
           <div className="glass-panel w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl p-6 md:p-8 border border-white/15 shadow-2xl relative my-auto">
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-white/10 pb-4 mb-6">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-primary/20 rounded-xl text-primary">
-                  <Radio size={22} />
+                <div className="w-9 h-9 bg-white text-[#0a0a0a] rounded-xl flex items-center justify-center shadow-sm">
+                  <Radio size={18} />
                 </div>
                 <div>
-                  <h2 className="text-2xl font-bold text-white">
+                  <h2 className="text-lg font-bold text-[#fafafa] tracking-tight">
                     {editingShow ? 'Edit Show Configuration' : 'Create Recurring Show'}
                   </h2>
-                  <p className="text-gray-400 text-xs">
+                  <p className="text-[#737373] text-xs">
                     Configure automated podcast generation parameters and schedule.
                   </p>
                 </div>
               </div>
               <button 
+                type="button"
                 onClick={handleCloseModal}
-                className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                className="p-2 rounded-xl text-[#737373] hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
@@ -516,7 +522,7 @@ const Shows = () => {
               {/* Show Name & Description */}
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-200 mb-1.5">
+                  <label className="block text-xs font-semibold text-[#a3a3a3] uppercase tracking-wider mb-1.5">
                     Show Title *
                   </label>
                   <input
@@ -525,12 +531,12 @@ const Shows = () => {
                     value={formData.name}
                     onChange={e => setFormData({ ...formData, name: e.target.value })}
                     placeholder="e.g. Daily Tech Radar, Morning Financial Pulse"
-                    className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white placeholder-gray-500 focus:outline-none focus:border-primary"
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#111111] border border-white/10 text-white placeholder-[#737373] focus:outline-none focus:border-white/40 focus:ring-1 focus:ring-white/40 text-xs font-medium"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-200 mb-1.5">
+                  <label className="block text-xs font-semibold text-[#a3a3a3] uppercase tracking-wider mb-1.5">
                     Description
                   </label>
                   <textarea
@@ -538,7 +544,7 @@ const Shows = () => {
                     value={formData.description}
                     onChange={e => setFormData({ ...formData, description: e.target.value })}
                     placeholder="Brief overview of what this show covers..."
-                    className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white placeholder-gray-500 focus:outline-none focus:border-primary resize-none"
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#111111] border border-white/10 text-white placeholder-[#737373] focus:outline-none focus:border-white/40 focus:ring-1 focus:ring-white/40 text-xs font-medium resize-none"
                   />
                 </div>
               </div>
@@ -546,7 +552,7 @@ const Shows = () => {
               {/* Source & Category */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-200 mb-1.5">
+                  <label className="block text-xs font-semibold text-[#a3a3a3] uppercase tracking-wider mb-1.5">
                     News Outlet
                   </label>
                   <select
@@ -560,10 +566,10 @@ const Shows = () => {
                         category: sObj?.categories[0]?.id || 'national'
                       });
                     }}
-                    className="w-full px-4 py-2.5 rounded-xl bg-[#1a1c23] border border-white/10 text-white focus:outline-none focus:border-primary"
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#111111] border border-white/10 text-white focus:outline-none focus:border-white/40 text-xs font-medium"
                   >
                     {sources.map(s => (
-                      <option key={s.id} value={s.id} className="bg-[#1a1c23] text-white">
+                      <option key={s.id} value={s.id} className="bg-[#111111] text-white">
                         {s.name} ({s.region})
                       </option>
                     ))}
@@ -571,16 +577,16 @@ const Shows = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-200 mb-1.5">
+                  <label className="block text-xs font-semibold text-[#a3a3a3] uppercase tracking-wider mb-1.5">
                     Category
                   </label>
                   <select
                     value={formData.category}
                     onChange={e => setFormData({ ...formData, category: e.target.value })}
-                    className="w-full px-4 py-2.5 rounded-xl bg-[#1a1c23] border border-white/10 text-white focus:outline-none focus:border-primary"
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#111111] border border-white/10 text-white focus:outline-none focus:border-white/40 text-xs font-medium"
                   >
                     {availableCategories.map(c => (
-                      <option key={c.id} value={c.id} className="bg-[#1a1c23] text-white">
+                      <option key={c.id} value={c.id} className="bg-[#111111] text-white">
                         {c.name}
                       </option>
                     ))}
@@ -591,48 +597,48 @@ const Shows = () => {
               {/* Format & Tone */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-200 mb-1.5">
+                  <label className="block text-xs font-semibold text-[#a3a3a3] uppercase tracking-wider mb-1.5">
                     Format
                   </label>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
                       onClick={() => setFormData({ ...formData, format: 'monologue' })}
-                      className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-sm font-medium transition-all cursor-pointer ${
+                      className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-medium transition-colors cursor-pointer ${
                         formData.format === 'monologue'
-                          ? 'bg-primary/20 text-primary border-primary/50'
-                          : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10'
+                          ? 'bg-white text-[#0a0a0a] border-white font-semibold'
+                          : 'bg-white/5 text-[#a3a3a3] border-white/10 hover:bg-white/10 hover:text-white'
                       }`}
                     >
-                      <User size={16} />
+                      <User size={14} />
                       Monologue
                     </button>
                     <button
                       type="button"
                       onClick={() => setFormData({ ...formData, format: 'dialogue' })}
-                      className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-sm font-medium transition-all cursor-pointer ${
+                      className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-medium transition-colors cursor-pointer ${
                         formData.format === 'dialogue'
-                          ? 'bg-purple-500/20 text-purple-300 border-purple-500/50'
-                          : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10'
+                          ? 'bg-white text-[#0a0a0a] border-white font-semibold'
+                          : 'bg-white/5 text-[#a3a3a3] border-white/10 hover:bg-white/10 hover:text-white'
                       }`}
                     >
-                      <Users size={16} />
+                      <Users size={14} />
                       Dialogue
                     </button>
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-200 mb-1.5">
+                  <label className="block text-xs font-semibold text-[#a3a3a3] uppercase tracking-wider mb-1.5">
                     Editorial Tone
                   </label>
                   <select
                     value={formData.tone}
                     onChange={e => setFormData({ ...formData, tone: e.target.value })}
-                    className="w-full px-4 py-2.5 rounded-xl bg-[#1a1c23] border border-white/10 text-white focus:outline-none focus:border-primary"
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#111111] border border-white/10 text-white focus:outline-none focus:border-white/40 text-xs font-medium"
                   >
                     {TONE_OPTIONS.map(t => (
-                      <option key={t.value} value={t.value} className="bg-[#1a1c23] text-white">
+                      <option key={t.value} value={t.value} className="bg-[#111111] text-white">
                         {t.label}
                       </option>
                     ))}
@@ -643,15 +649,15 @@ const Shows = () => {
               {/* Voice Selection */}
               {formData.format === 'dialogue' ? (
                 <div>
-                  <label className="block text-sm font-semibold text-gray-200 mb-1.5">
+                  <label className="block text-xs font-semibold text-[#a3a3a3] uppercase tracking-wider mb-1.5">
                     Dual Host Pair
                   </label>
                   <select
                     onChange={e => handleSelectHostPair(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl bg-[#1a1c23] border border-white/10 text-white focus:outline-none focus:border-primary"
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#111111] border border-white/10 text-white focus:outline-none focus:border-white/40 text-xs font-medium"
                   >
                     {hostPairs.map(hp => (
-                      <option key={hp.id} value={hp.id} className="bg-[#1a1c23] text-white">
+                      <option key={hp.id} value={hp.id} className="bg-[#111111] text-white">
                         {hp.name} ({hp.voice_a_name} & {hp.voice_b_name})
                       </option>
                     ))}
@@ -659,16 +665,16 @@ const Shows = () => {
                 </div>
               ) : (
                 <div>
-                  <label className="block text-sm font-semibold text-gray-200 mb-1.5">
+                  <label className="block text-xs font-semibold text-[#a3a3a3] uppercase tracking-wider mb-1.5">
                     Narrator Voice
                   </label>
                   <select
                     value={formData.voice}
                     onChange={e => setFormData({ ...formData, voice: e.target.value })}
-                    className="w-full px-4 py-2.5 rounded-xl bg-[#1a1c23] border border-white/10 text-white focus:outline-none focus:border-primary"
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#111111] border border-white/10 text-white focus:outline-none focus:border-white/40 text-xs font-medium"
                   >
                     {voices.map(v => (
-                      <option key={v.id} value={v.id} className="bg-[#1a1c23] text-white">
+                      <option key={v.id} value={v.id} className="bg-[#111111] text-white">
                         {v.name} ({v.locale} - {v.gender})
                       </option>
                     ))}
@@ -678,12 +684,12 @@ const Shows = () => {
 
               {/* Target Minutes Slider */}
               <div className="glass-panel p-4 rounded-xl border border-white/10 space-y-2">
-                <div className="flex justify-between items-center text-sm font-semibold text-gray-200">
+                <div className="flex justify-between items-center text-xs font-semibold text-[#fafafa]">
                   <span className="flex items-center gap-1.5">
-                    <Clock size={16} className="text-primary" />
+                    <Clock size={14} className="text-white" />
                     Target Length: {formData.target_minutes} Minutes
                   </span>
-                  <span className="text-xs text-primary font-medium">
+                  <span className="text-xs text-[#a3a3a3] font-medium">
                     ~{formData.target_minutes * 140} words • ~{Math.max(1, Math.min(10, Math.round(formData.target_minutes * 0.75)))} stories
                   </span>
                 </div>
@@ -694,9 +700,9 @@ const Shows = () => {
                   step="1"
                   value={formData.target_minutes}
                   onChange={e => setFormData({ ...formData, target_minutes: parseInt(e.target.value, 10) })}
-                  className="w-full accent-primary cursor-pointer"
+                  className="w-full accent-white cursor-pointer"
                 />
-                <div className="flex justify-between text-[11px] text-gray-500">
+                <div className="flex justify-between text-[10px] text-[#737373]">
                   <span>2 min (Quick Brief)</span>
                   <span>5 min (Standard)</span>
                   <span>10 min (In-Depth)</span>
@@ -706,7 +712,7 @@ const Shows = () => {
 
               {/* Schedule Settings */}
               <div className="space-y-3">
-                <label className="block text-sm font-semibold text-gray-200">
+                <label className="block text-xs font-semibold text-[#a3a3a3] uppercase tracking-wider">
                   Cadence & Schedule (APScheduler)
                 </label>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -724,10 +730,10 @@ const Shows = () => {
                             setFormData({ ...formData, schedule: preset.value });
                           }
                         }}
-                        className={`text-left px-3.5 py-2.5 rounded-xl border text-xs font-medium transition-all cursor-pointer ${
+                        className={`text-left px-3.5 py-2.5 rounded-xl border text-xs font-medium transition-colors cursor-pointer ${
                           isSelected
-                            ? 'bg-primary/20 text-white border-primary'
-                            : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10'
+                            ? 'bg-white text-[#0a0a0a] font-semibold border-white shadow-sm'
+                            : 'bg-white/5 text-[#a3a3a3] border-white/10 hover:bg-white/10 hover:text-white'
                         }`}
                       >
                         {preset.label}
@@ -738,7 +744,7 @@ const Shows = () => {
 
                 {isCustomSchedule && (
                   <div className="pt-2 animate-fade-in">
-                    <label className="block text-xs font-medium text-gray-400 mb-1">
+                    <label className="block text-xs font-medium text-[#737373] mb-1">
                       Cron Expression (5-field: minute hour day month weekday)
                     </label>
                     <input
@@ -746,7 +752,7 @@ const Shows = () => {
                       value={customScheduleInput}
                       onChange={e => setCustomScheduleInput(e.target.value)}
                       placeholder="e.g. 0 8 * * * or 30 14 * * 1-5"
-                      className="w-full px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white font-mono text-sm focus:outline-none focus:border-primary"
+                      className="w-full px-4 py-2 rounded-xl bg-[#111111] border border-white/10 text-white font-mono text-xs focus:outline-none focus:border-white/40"
                     />
                   </div>
                 )}
@@ -759,9 +765,9 @@ const Shows = () => {
                   id="enabledCheckbox"
                   checked={formData.enabled}
                   onChange={e => setFormData({ ...formData, enabled: e.target.checked })}
-                  className="w-4 h-4 rounded accent-primary cursor-pointer"
+                  className="w-4 h-4 rounded accent-white cursor-pointer"
                 />
-                <label htmlFor="enabledCheckbox" className="text-sm font-medium text-gray-300 cursor-pointer">
+                <label htmlFor="enabledCheckbox" className="text-xs font-medium text-[#a3a3a3] cursor-pointer">
                   Enable scheduled automation immediately after saving
                 </label>
               </div>
@@ -771,13 +777,13 @@ const Shows = () => {
                 <button
                   type="button"
                   onClick={handleCloseModal}
-                  className="px-5 py-2.5 rounded-xl border border-white/10 text-gray-400 hover:text-white hover:bg-white/5 font-medium text-sm transition-colors"
+                  className="btn-secondary py-2 px-4 text-xs font-semibold"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2.5 bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white font-semibold text-sm rounded-xl shadow-lg shadow-primary/25 transition-all cursor-pointer"
+                  className="btn-primary py-2 px-5 text-xs font-semibold"
                 >
                   {editingShow ? 'Update Show' : 'Create Show'}
                 </button>

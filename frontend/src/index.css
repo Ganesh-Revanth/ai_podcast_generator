@@ -3,20 +3,37 @@
 
 @layer base {
   body {
-    @apply bg-background text-gray-100 font-sans antialiased;
+    @apply bg-background text-[#fafafa] font-sans antialiased selection:bg-white/20 selection:text-white;
+  }
+
+  /* Range input customization for audio scrubbers */
+  input[type="range"] {
+    accent-color: #ffffff;
   }
 }
 
 @layer components {
   .glass-panel {
-    @apply bg-surface/80 backdrop-blur-md border border-white/10 rounded-2xl shadow-xl;
+    @apply bg-surface border border-white/[0.08] rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.5)];
   }
   
   .btn-primary {
-    @apply px-6 py-3 bg-gradient-to-r from-primary to-accent hover:from-blue-500 hover:to-purple-500 text-white font-medium rounded-xl transition-all duration-300 shadow-lg shadow-primary/25 hover:shadow-primary/40 transform hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2;
+    @apply px-6 py-3 bg-white hover:bg-[#e5e5e5] active:bg-[#d4d4d4] text-[#0a0a0a] font-semibold rounded-xl transition-colors duration-150 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50;
   }
   
   .btn-secondary {
-    @apply px-6 py-3 bg-white/5 hover:bg-white/10 text-white font-medium rounded-xl border border-white/10 transition-all duration-300 flex items-center justify-center gap-2;
+    @apply px-6 py-3 bg-white/[0.04] hover:bg-white/[0.08] active:bg-white/[0.12] text-[#fafafa] font-medium rounded-xl border border-white/[0.08] hover:border-white/[0.16] transition-colors duration-150 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50;
+  }
+}
+
+/* Accessibility: Respect user motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

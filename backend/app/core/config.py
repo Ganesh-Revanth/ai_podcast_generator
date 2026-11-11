@@ -17,11 +17,20 @@ class Settings(BaseSettings):
     AUDIO_STORAGE_DIR: str = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "audio")
     MUSIC_STORAGE_DIR: str = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "music")
 
+    BACKEND_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
         return f"sqlite:///{self.SQLITE_DB_PATH}"
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env"),
+            ".env"
+        ),
+        case_sensitive=True,
+        extra="ignore"
+    )
 
 settings = Settings()
 

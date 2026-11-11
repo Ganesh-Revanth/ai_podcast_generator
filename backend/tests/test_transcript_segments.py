@@ -62,3 +62,4 @@ def test_stitch_dialogue_turns_calculates_timed_segments():
         # Third segment
         assert segments[2]["start"] >= segments[1]["end"] + 0.35
         assert segments[2]["speaker"] == "Host A"
+

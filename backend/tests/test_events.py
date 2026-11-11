@@ -77,3 +77,4 @@ def test_sse_endpoint_failed_episode(client, db):
 def test_sse_endpoint_404_missing(client):
     response = client.get("/api/episodes/888888/events")
     assert response.status_code == 404
+
