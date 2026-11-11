@@ -1,5 +1,6 @@
 import feedparser
 import logging
+import trafilatura
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 from email.utils import parsedate_tz, mktime_tz
@@ -116,6 +117,32 @@ def parse_date(date_string: Optional[str]) -> datetime:
         pass
     return datetime.now(timezone.utc)
 
+def extract_full_article_text(url: str, fallback_html: str = "") -> str:
+    """
+    Attempts to extract clean, full article text from a URL using trafilatura.
+    Falls back to clean_html(fallback_html) if extraction fails, times out,
+    or returns fewer than 80 characters.
+    """
+    fallback = clean_html(fallback_html) if fallback_html else ""
+    if not url or url.startswith("custom://"):
+        return fallback
+
+    try:
+        downloaded = trafilatura.fetch_url(url)
+        if downloaded:
+            extracted = trafilatura.extract(
+                downloaded,
+                include_comments=False,
+                include_tables=False,
+                no_fallback=False
+            )
+            if extracted and len(extracted.strip()) >= 80:
+                return extracted.strip()
+    except Exception as e:
+        logger.debug(f"Trafilatura extraction failed for {url}: {e}")
+
+    return fallback
+
 def get_available_sources() -> List[Dict]:
     """Returns the list of news channels and their supported categories."""
     sources_list = []
@@ -166,7 +193,7 @@ def fetch_articles_from_source(source_id: str, category_id: Optional[str] = None
             continue
 
         raw_summary = getattr(entry, 'summary', '') or getattr(entry, 'description', '')
-        content = clean_html(raw_summary)
+        content = extract_full_article_text(url, fallback_html=raw_summary)
         if len(content) < 15: # if summary is very short, use title
             content = title
 
@@ -174,6 +201,11 @@ def fetch_articles_from_source(source_id: str, category_id: Optional[str] = None
         article = None
         if db:
             article = db.query(models.Article).filter(models.Article.url == url).first()
+
+        if article and (not article.content or len(article.content) < 150) and len(content) > len(article.content or ""):
+            article.content = content
+            if db:
+                db.commit()
 
         if not article:
             article = models.Article(

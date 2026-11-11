@@ -1,4 +1,5 @@
 import datetime
+import json
 import logging
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
@@ -8,13 +9,15 @@ from app.db.session import get_db, SessionLocal
 from app.db import models
 from app.schemas import schemas
 from app.services.news_service import fetch_and_store_news, get_available_sources, fetch_articles_from_source, NEWS_SOURCES
+from app.services.curation_service import deduplicate_articles, cluster_articles_by_topic
 from app.services.ai_service import (
     generate_podcast_script,
     generate_podcast_script_from_text,
     generate_podcast_dialogue,
     generate_podcast_dialogue_from_text,
     format_dialogue_script,
-    calculate_story_count
+    calculate_story_count,
+    fact_check_script
 )
 from app.services.tts_service import (
     generate_audio_from_script,
@@ -149,19 +152,26 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
                 logger.warning(f"Episode {episode_id} failed: {episode.error_message}")
                 return
 
+            # Deduplicate near-identical stories across outlets
+            articles = deduplicate_articles(articles)
+
+            # Cluster stories by topic so the script has cohesive segments
+            clusters = cluster_articles_by_topic(articles)
+
             # Link articles to episode
             for article in articles:
                 if article not in episode.articles:
                     episode.articles.append(article)
             db.commit()
 
-            # Generate Script via AI from fetched live articles
+            # Generate Script via AI from fetched live articles organized by clusters
             if is_dialogue:
                 dialogue_turns = generate_podcast_dialogue(
                     articles=articles,
                     tone=request.tone,
                     host_style=request.host_style,
-                    target_minutes=target_minutes
+                    target_minutes=target_minutes,
+                    clusters=clusters
                 )
                 script = format_dialogue_script(dialogue_turns)
             else:
@@ -169,7 +179,8 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
                     articles=articles,
                     tone=request.tone,
                     host_style=request.host_style,
-                    target_minutes=target_minutes
+                    target_minutes=target_minutes,
+                    clusters=clusters
                 )
 
         else:
@@ -181,6 +192,19 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
         episode.script = script
         episode.status = "script_generated"
         db.commit()
+
+        # Fact-Check Step: verify generated script claims against source articles
+        try:
+            source_docs = articles if (request.source_mode in ["channel", "rss"] or request.source_id) else episode.articles
+            fc_status, fc_flags = fact_check_script(script, source_docs)
+            episode.fact_check_status = fc_status
+            episode.fact_check_flags = json.dumps(fc_flags) if fc_flags else None
+            db.commit()
+            logger.info(f"Fact-check for episode {episode.id} completed: status='{fc_status}', flags={len(fc_flags)}")
+        except Exception as fc_err:
+            logger.error(f"Error during fact check for episode {episode.id}: {fc_err}")
+            episode.fact_check_status = "unverified"
+            db.commit()
 
         # 3. Generate Audio via TTS
         audio_filename = f"episode_{episode.id}.mp3"

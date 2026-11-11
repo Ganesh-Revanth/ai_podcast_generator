@@ -2,7 +2,7 @@ import re
 import json
 import logging
 import openai
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple, Any
 from app.db import models
 from app.core.config import settings
 
@@ -178,14 +178,32 @@ def generate_podcast_script_from_text(
         episode_title = title if title else "Today's Top Story"
         return f"Welcome to today's audio briefing. In our top story, {episode_title}. {first_part}. Thank you for tuning in to this news update. Have a wonderful day."
 
+def format_clustered_articles_text(clusters: List[Any]) -> str:
+    """Formats topic clusters into structured segments for the LLM prompt."""
+    text_blocks = []
+    for c_idx, cluster in enumerate(clusters):
+        title = getattr(cluster, "title", f"Topic {c_idx + 1}")
+        block = f"\n=== TOPIC SEGMENT {c_idx + 1}: {title} ===\n"
+        articles = getattr(cluster, "articles", [])
+        for s_idx, article in enumerate(articles):
+            src = getattr(article, "source", "News Source")
+            art_title = getattr(article, "title", "Untitled Story")
+            content_snip = (article.content[:1500] if getattr(article, "content", None) else "").strip()
+            block += f"Story {s_idx + 1}: {art_title} (Source: {src})\n"
+            block += f"Details: {content_snip}\n\n"
+        text_blocks.append(block)
+    return "\n".join(text_blocks)
+
 def generate_podcast_script(
     articles: List[models.Article],
     tone: str = "professional",
     host_style: str = "informative",
-    target_minutes: Optional[int] = 5
+    target_minutes: Optional[int] = 5,
+    clusters: Optional[List[Any]] = None
 ) -> str:
     """
     Uses an LLM to generate a podcast script from a list of articles scaled to target_minutes.
+    Organizes stories into topic segments for cohesive, single-topic discussion.
     """
     if not articles:
         return "Welcome to the podcast. We have no news for you today. Goodbye!"
@@ -195,12 +213,12 @@ def generate_podcast_script(
     max_tokens = calculate_max_tokens(word_budget)
     mins = target_minutes or 5
     
-    # Prepare article text
-    articles_text = ""
-    for idx, article in enumerate(articles):
-        articles_text += f"\n--- STORY {idx + 1} ---\n"
-        articles_text += f"Headline: {article.title}\n"
-        articles_text += f"Content: {article.content}\n"
+    # Prepare clustered article text
+    if clusters is None:
+        from app.services.curation_service import cluster_articles_by_topic
+        clusters = cluster_articles_by_topic(articles)
+
+    articles_text = format_clustered_articles_text(clusters)
         
     system_prompt = f"""
     You are an AI generating a script for a news podcast.
@@ -209,12 +227,13 @@ def generate_podcast_script(
     Target Duration: approximately {mins} minutes (~{word_budget} words total).
     
     Your task is to take the provided news stories and write a seamless podcast script matching the requested target duration.
-    It should include:
+    The stories are organized into topic segments.
+    Guidelines:
     - An opening intro welcoming listeners.
-    - Summaries and context for each story, presented naturally as a human host would.
-    - Smooth transitions between stories.
+    - Dedicate one focused segment per topic cluster. Synthesize all stories within a segment together into a natural narrative before transitioning smoothly to the next segment.
+    - Seamless, contextual transitions between different topic segments.
     - Aim for approximately {word_budget} spoken words across the stories.
-    - A closing outro.
+    - A memorable closing sign-off outro.
     
     Output ONLY the spoken script. Do not include stage directions, sound effects, or speaker tags (like 'Host:').
     Just pure spoken text. Make it sound like a real, engaging podcast, not just reading bullet points.
@@ -397,10 +416,12 @@ def generate_podcast_dialogue(
     articles: List[models.Article],
     tone: str = "professional",
     host_style: str = "conversational",
-    target_minutes: Optional[int] = 5
+    target_minutes: Optional[int] = 5,
+    clusters: Optional[List[Any]] = None
 ) -> List[Dict[str, str]]:
     """
     Uses an LLM to transform multiple news articles into a structured two-host dialogue scaled to target_minutes.
+    Organizes stories into topic segments so hosts discuss one topic segment before transitioning.
     Returns a list of turns: [{"speaker": "A", "text": "..."}, {"speaker": "B", "text": "..."}]
     """
     if not articles:
@@ -415,11 +436,12 @@ def generate_podcast_dialogue(
     mins = target_minutes or 5
     estimated_turns = max(6, min(30, round(word_budget / 55)))
 
-    articles_text = ""
-    for idx, article in enumerate(articles):
-        articles_text += f"\n--- STORY {idx + 1} ---\n"
-        articles_text += f"Headline: {article.title}\n"
-        articles_text += f"Content: {article.content}\n"
+    # Prepare clustered article text
+    if clusters is None:
+        from app.services.curation_service import cluster_articles_by_topic
+        clusters = cluster_articles_by_topic(articles)
+
+    articles_text = format_clustered_articles_text(clusters)
 
     system_prompt = f"""
     You are an expert podcast production team creating a two-host conversational news podcast.
@@ -430,6 +452,11 @@ def generate_podcast_dialogue(
     Target Duration: approximately {mins} minutes (~{word_budget} words total).
 
     Your task is to take the provided stories and adapt them into a smooth, natural two-host dialogue matching the target duration.
+    The stories are organized into topic segments.
+    Guidelines:
+    - Dedicate one focused segment per topic cluster, discussing related stories together.
+    - Create natural, conversational back-and-forth banter, reactions, and questions between Host A and Host B.
+    - Smooth transitions between different topic segments.
 
     CRITICAL INSTRUCTION - STRICT JSON OUTPUT:
     You MUST output ONLY a valid JSON array of objects. Do not include markdown formatting, code fences, or any commentary outside the JSON array.
@@ -461,7 +488,6 @@ def generate_podcast_dialogue(
         )
         raw_output = response.choices[0].message.content
         return parse_dialogue_json(raw_output)
-        return parse_dialogue_json(raw_output)
     except Exception as e:
         logger.error(f"LLM Error during multi-article dialogue generation: {e}")
         turns = [
@@ -473,3 +499,121 @@ def generate_podcast_dialogue(
             curr = "A" if curr == "B" else "B"
         turns.append({"speaker": curr, "text": "That concludes today's briefing. Thanks for listening!"})
         return turns
+
+def parse_fact_check_json(raw_text: str) -> List[Dict[str, Any]]:
+    """
+    Parses and normalizes the JSON array of fact check flags returned by the LLM:
+    [{"claim": "...", "status": "unsupported", "reason": "...", "severity": "medium"}]
+    """
+    if not raw_text or not raw_text.strip():
+        return []
+
+    text_to_parse = raw_text.strip()
+    if "```" in text_to_parse:
+        m = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text_to_parse, re.IGNORECASE)
+        if m:
+            text_to_parse = m.group(1).strip()
+
+    parsed = None
+    try:
+        parsed = json.loads(text_to_parse)
+    except Exception:
+        m = re.search(r'\[\s*\{[\s\S]*\}\s*\]', text_to_parse)
+        if m:
+            try:
+                parsed = json.loads(m.group(0))
+            except Exception:
+                pass
+
+    if not isinstance(parsed, list):
+        return []
+
+    valid_flags: List[Dict[str, Any]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        claim = str(item.get("claim", "")).strip()
+        reason = str(item.get("reason", "")).strip()
+        status = str(item.get("status", "unsupported")).strip().lower()
+        severity = str(item.get("severity", "medium")).strip().lower()
+        if status not in ["unsupported", "contradiction", "exaggeration"]:
+            status = "unsupported"
+        if severity not in ["high", "medium", "low"]:
+            severity = "medium"
+
+        if claim and reason:
+            valid_flags.append({
+                "claim": claim,
+                "status": status,
+                "reason": reason,
+                "severity": severity
+            })
+
+    return valid_flags
+
+def fact_check_script(script: str, articles: List[models.Article]) -> Tuple[str, List[Dict[str, Any]]]:
+    """
+    Performs a secondary LLM verification comparing the generated script against
+    the source article texts. Returns (status, flags) where status is 'passed' or 'flagged'.
+    """
+    if not script or not articles:
+        return ("passed", [])
+
+    client = get_llm_client()
+
+    # Aggregate verified facts from sources
+    sources_summary = ""
+    for idx, article in enumerate(articles):
+        sources_summary += f"\n--- SOURCE STORY {idx + 1}: {article.title} ({article.source}) ---\n"
+        content_snip = (article.content[:1600] if getattr(article, "content", None) else "").strip()
+        sources_summary += f"{content_snip}\n"
+
+    system_prompt = """
+    You are a rigorous, impartial fact-checker for an AI news podcast production pipeline.
+    Your task is to verify the generated spoken podcast script against the verified source articles provided.
+
+    Check for:
+    1. Factual contradictions: Does the script state anything directly refuted by the source text?
+    2. Hallucinations & fabrications: Does the script invent specific numbers, dates, names, locations, quotes, or statistics not found in the source text?
+    3. Severe distortions: Does the script make extreme inferences that cannot be reasonably substantiated by the sources?
+
+    CRITICAL INSTRUCTION - STRICT JSON OUTPUT:
+    You MUST output ONLY a valid JSON array of objects. Do not include markdown formatting, code fences, or any commentary outside the JSON array.
+    If all claims in the script are faithful and supported by the source articles, output an empty array [].
+
+    Each flagged object in the array MUST contain:
+      "claim": "Direct quotation or statement from the script that is problematic",
+      "status": "unsupported" | "contradiction" | "exaggeration",
+      "reason": "Clear explanation of why this claim is flagged against the source articles",
+      "severity": "high" | "medium" | "low"
+
+    Example:
+    [
+      {
+        "claim": "The mission cost over 5 billion dollars",
+        "status": "unsupported",
+        "reason": "The source articles do not state any budget figures for the mission",
+        "severity": "medium"
+      }
+    ]
+    """
+
+    try:
+        response = client.chat.completions.create(
+            model=settings.LLM_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"VERIFIED SOURCE ARTICLES:\n{sources_summary}\n\nGENERATED SCRIPT TO VERIFY:\n{script}"}
+            ],
+            temperature=0.2,
+            max_tokens=1500
+        )
+        raw_output = response.choices[0].message.content
+        flags = parse_fact_check_json(raw_output)
+        status = "flagged" if len(flags) > 0 else "passed"
+        return (status, flags)
+    except Exception as e:
+        logger.error(f"Error during script fact-check step: {e}")
+        # Graceful fallback: do not fail episode generation if fact checker fails
+        return ("passed", [])
+

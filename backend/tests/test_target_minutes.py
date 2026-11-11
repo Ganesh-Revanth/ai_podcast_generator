@@ -47,3 +47,4 @@ def test_empty_articles_handles_target_minutes():
     assert len(dialogue) == 2
     assert dialogue[0]["speaker"] == "A"
     assert dialogue[1]["speaker"] == "B"
+

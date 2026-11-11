@@ -71,14 +71,17 @@ The frontend will be available at `http://localhost:5173`.
 ## Features
 - **Monologue & Dialogue Formats**: Choose between a solo news anchor or an engaging two-host conversational discussion with strict JSON dialogue generation.
 - **Dual-Host Audio Synthesis & Stitching**: High quality dual voice acting with Edge-TTS, 400ms natural transitions, retry backoff, and intro/outro music branding.
+- **Smart News Pipeline**: Full article text extraction with `trafilatura` (with fallback to feed summaries), cross-outlet deduplication of near-identical stories, and topic clustering into distinct episode segments.
+- **Automated Fact-Checking & Show Notes**: Secondary LLM fact-checking pass comparing script claims against verified source texts, with interactive Show Notes and fact-check audits on the Player page.
 - **Recurring Shows & Automation**: Create automated shows tied to specific news outlets and categories with APScheduler background jobs (daily, hourly, or cron).
 - **Target Minutes Pacing**: Dynamically scales story counts and word budgets (~140 WPM) to meet 2 to 20 minute target episode durations.
 - **Modern Glassmorphic UI**: Dashboard, Studio Generator, Library Player with live audio playback, and a dedicated Shows management panel.
 
 ## Architecture Overview
 - **Backend Services**:
-  - `news_service.py`: Fetches and stores articles from RSS outlets.
-  - `ai_service.py`: Generates monologue and strict JSON dialogue scripts with dynamic length budgets.
+  - `news_service.py`: Fetches RSS feeds and extracts full article text via `trafilatura` (with safe fallback).
+  - `curation_service.py`: Cross-outlet deduplication and topic clustering to group multi-source stories into cohesive script segments.
+  - `ai_service.py`: Generates monologue and strict JSON dialogue scripts with dynamic length budgets, and conducts automated fact-check audits.
   - `tts_service.py`: Converts text to audio via Edge-TTS and stitches dialogue turns and music branding with `pydub`.
   - `scheduler_service.py`: Manages automated episode generation with `APScheduler`.
 - **Frontend Layout**: Modern sidebar layout (`App.jsx`) with dynamic glowing backgrounds, glass-morphism panels, and Tailwind animations covering Dashboard, Generator Studio, Shows Automation, and Player Library.

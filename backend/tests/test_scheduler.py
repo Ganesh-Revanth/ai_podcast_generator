@@ -73,3 +73,4 @@ def test_schedule_and_remove_show_job():
 
     remove_show_job(9999)
     assert scheduler.get_job("show_9999") is None
+

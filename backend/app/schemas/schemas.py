@@ -114,12 +114,20 @@ class EpisodeGenerateRequest(BaseModel):
     show_id: Optional[int] = None
     target_minutes: Optional[int] = 5
 
+class FactCheckFlag(BaseModel):
+    claim: str
+    status: str # "unsupported", "contradiction", "exaggeration"
+    reason: str
+    severity: Optional[str] = "medium" # "high", "medium", "low"
+
 class EpisodeBase(BaseModel):
     title: str
     status: str
     duration_seconds: Optional[int] = 0
     error_message: Optional[str] = None
     show_id: Optional[int] = None
+    fact_check_status: Optional[str] = "unverified" # "passed", "flagged", "unverified"
+    fact_check_flags: Optional[str] = None # JSON string of flags
 
 class Episode(EpisodeBase):
     id: int

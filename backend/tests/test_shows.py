@@ -108,3 +108,4 @@ def test_run_show_now_creates_episode_linked_to_show():
 
     # Cleanup
     client.delete(f"/api/shows/{show_id}")
+

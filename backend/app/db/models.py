@@ -62,6 +62,8 @@ class Episode(Base):
     audio_url = Column(String, nullable=True) # relative path to the audio file
     error_message = Column(Text, nullable=True)
     show_id = Column(Integer, ForeignKey("shows.id"), nullable=True, index=True)
+    fact_check_status = Column(String, default="unverified") # unverified, passed, flagged
+    fact_check_flags = Column(Text, nullable=True) # JSON array of flagged claims
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Relationships

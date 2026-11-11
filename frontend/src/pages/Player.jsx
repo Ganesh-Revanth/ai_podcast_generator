@@ -9,9 +9,13 @@ import {
   ChevronUp, 
   Copy, 
   Check, 
-  Trash2,
-  Sparkles,
-  Plus
+  Trash2, 
+  Sparkles, 
+  Plus,
+  BookOpen,
+  ExternalLink,
+  ShieldCheck,
+  ShieldAlert
 } from 'lucide-react';
 import { getEpisodes, deleteEpisode, BASE_URL } from '../services/api';
 import { Link } from 'react-router-dom';
@@ -20,6 +24,8 @@ const Player = () => {
   const [episodes, setEpisodes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedScript, setExpandedScript] = useState(null);
+  const [expandedNotes, setExpandedNotes] = useState(null);
+  const [expandedFactCheck, setExpandedFactCheck] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
 
   const fetchEpisodes = async () => {
@@ -47,6 +53,14 @@ const Player = () => {
 
   const toggleScript = (id) => {
     setExpandedScript(expandedScript === id ? null : id);
+  };
+
+  const toggleNotes = (id) => {
+    setExpandedNotes(expandedNotes === id ? null : id);
+  };
+
+  const toggleFactCheck = (id) => {
+    setExpandedFactCheck(expandedFactCheck === id ? null : id);
   };
 
   const handleCopyScript = (id, script) => {
@@ -101,6 +115,14 @@ const Player = () => {
         <div className="space-y-6">
           {episodes.map((episode) => {
             const isCustomArticle = episode.articles && episode.articles.some(a => a.source === 'Custom Article Input' || a.category === 'Custom');
+            let parsedFlags = [];
+            try {
+              if (episode.fact_check_flags) {
+                parsedFlags = JSON.parse(episode.fact_check_flags);
+              }
+            } catch {
+              parsedFlags = [];
+            }
             
             return (
               <div 
@@ -146,8 +168,29 @@ const Player = () => {
                         </h3>
                       </div>
                       
-                      {/* Status Badge */}
-                      <div className="flex items-center gap-2">
+                      {/* Status Badges */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Fact Check Badge */}
+                        {episode.fact_check_status === 'passed' && (
+                          <span className="px-2.5 py-1 bg-emerald-500/10 text-emerald-400 text-xs font-semibold rounded-full border border-emerald-500/20 flex items-center gap-1.5" title="All claims verified against source articles">
+                            <ShieldCheck size={13} /> Verified
+                          </span>
+                        )}
+
+                        {episode.fact_check_status === 'flagged' && (
+                          <button
+                            type="button"
+                            onClick={() => toggleFactCheck(episode.id)}
+                            className="px-2.5 py-1 bg-amber-500/15 text-amber-300 text-xs font-semibold rounded-full border border-amber-500/30 flex items-center gap-1.5 hover:bg-amber-500/25 transition-colors cursor-pointer"
+                            title="Click to view flagged claims"
+                          >
+                            <ShieldAlert size={13} className="text-amber-400" />
+                            Fact-Check: {parsedFlags.length} Flagged
+                            {expandedFactCheck === episode.id ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
+                          </button>
+                        )}
+
+                        {/* Readiness Status */}
                         {episode.status === 'completed' && (
                           <span className="px-3 py-1 bg-emerald-500/20 text-emerald-400 text-xs font-bold rounded-full border border-emerald-500/30 uppercase tracking-wider">
                             Ready
@@ -190,20 +233,31 @@ const Player = () => {
 
                 {/* Actions Bar */}
                 <div className="border-t border-white/5 bg-black/30 p-4 px-6 md:px-8 flex flex-wrap justify-between items-center gap-4">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <button 
                       onClick={() => toggleScript(episode.id)}
-                      className="flex items-center gap-2 text-sm text-gray-300 hover:text-white font-medium transition-colors bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/10"
+                      className="flex items-center gap-2 text-sm text-gray-300 hover:text-white font-medium transition-colors bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/10 cursor-pointer"
                     >
                       <FileText size={16} className="text-primary" />
                       {expandedScript === episode.id ? 'Hide Script' : 'Read Podcast Script'}
                       {expandedScript === episode.id ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
                     </button>
 
+                    {episode.articles && episode.articles.length > 0 && (
+                      <button 
+                        onClick={() => toggleNotes(episode.id)}
+                        className="flex items-center gap-2 text-sm text-gray-300 hover:text-white font-medium transition-colors bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/10 cursor-pointer"
+                      >
+                        <BookOpen size={16} className="text-accent" />
+                        {expandedNotes === episode.id ? 'Hide Sources' : `Show Notes (${episode.articles.length})`}
+                        {expandedNotes === episode.id ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+                      </button>
+                    )}
+
                     {episode.script && (
                       <button
                         onClick={() => handleCopyScript(episode.id, episode.script)}
-                        className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors px-2.5 py-1.5 rounded-lg hover:bg-white/5"
+                        className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors px-2.5 py-1.5 rounded-lg hover:bg-white/5 cursor-pointer"
                         title="Copy script to clipboard"
                       >
                         {copiedId === episode.id ? (
@@ -236,13 +290,120 @@ const Player = () => {
 
                     <button
                       onClick={() => handleDelete(episode.id)}
-                      className="text-gray-500 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-white/5"
+                      className="text-gray-500 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-white/5 cursor-pointer"
                       title="Delete Episode"
                     >
                       <Trash2 size={16} />
                     </button>
                   </div>
                 </div>
+
+                {/* Show Notes & Sources Drawer */}
+                {expandedNotes === episode.id && episode.articles && (
+                  <div className="p-6 md:p-8 bg-black/40 border-t border-white/10 animate-slide-up space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <BookOpen size={18} className="text-accent"/>
+                        <h4 className="text-white font-bold text-base">Show Notes & Referenced Sources</h4>
+                      </div>
+                      <span className="text-xs text-gray-400">
+                        {episode.articles.length} verified news reference{episode.articles.length === 1 ? '' : 's'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                      {episode.articles.map((art) => {
+                        const isCustom = art.source === 'Custom Article Input' || art.url?.startsWith('custom://');
+                        return (
+                          <div 
+                            key={art.id} 
+                            className="p-3.5 rounded-xl bg-white/5 border border-white/10 hover:border-white/20 transition-all flex flex-col justify-between gap-2"
+                          >
+                            <div>
+                              <div className="flex items-center gap-2 mb-1.5">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-accent/20 text-accent border border-accent/30 uppercase">
+                                  {art.source}
+                                </span>
+                                {art.category && (
+                                  <span className="text-[11px] text-gray-400">
+                                    • {art.category}
+                                  </span>
+                                )}
+                              </div>
+                              <h5 className="text-sm font-semibold text-gray-200 line-clamp-2 leading-snug">
+                                {art.title}
+                              </h5>
+                            </div>
+
+                            {isCustom ? (
+                              <span className="text-xs text-gray-500 italic">User-provided text input</span>
+                            ) : (
+                              <a
+                                href={art.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 text-xs text-primary hover:text-blue-300 font-medium transition-colors"
+                              >
+                                Read original article <ExternalLink size={12} />
+                              </a>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Fact-Check Flags Drawer */}
+                {expandedFactCheck === episode.id && parsedFlags.length > 0 && (
+                  <div className="p-6 md:p-8 bg-amber-950/20 border-t border-amber-500/20 animate-slide-up space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-amber-300">
+                        <ShieldAlert size={18} />
+                        <h4 className="font-bold text-base">Fact-Check Review ({parsedFlags.length} Flagged Claims)</h4>
+                      </div>
+                      <span className="text-xs text-amber-300/80">
+                        Verified by Secondary LLM Validator
+                      </span>
+                    </div>
+
+                    <div className="space-y-3 pt-1">
+                      {parsedFlags.map((flag, fIdx) => (
+                        <div 
+                          key={fIdx} 
+                          className="p-4 rounded-xl bg-black/40 border border-amber-500/20 space-y-2 text-xs"
+                        >
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="font-semibold text-amber-200 text-sm">
+                              Claim #{fIdx + 1}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                flag.severity === 'high' ? 'bg-red-500/20 text-red-300 border border-red-500/30' :
+                                flag.severity === 'low' ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
+                                'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                              }`}>
+                                Severity: {flag.severity || 'medium'}
+                              </span>
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-white/10 text-gray-300 uppercase">
+                                {flag.status || 'unsupported'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="bg-white/5 p-2.5 rounded-lg border border-white/5 text-gray-300 italic">
+                            "{flag.claim}"
+                          </div>
+
+                          <div className="text-gray-400">
+                            <span className="text-amber-400/90 font-medium">Issue: </span>
+                            {flag.reason}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Script Expansion Drawer */}
                 {expandedScript === episode.id && episode.script && (
