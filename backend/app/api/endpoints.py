@@ -8,8 +8,19 @@ from app.db.session import get_db, SessionLocal
 from app.db import models
 from app.schemas import schemas
 from app.services.news_service import fetch_and_store_news, get_available_sources, fetch_articles_from_source, NEWS_SOURCES
-from app.services.ai_service import generate_podcast_script, generate_podcast_script_from_text
-from app.services.tts_service import generate_audio_from_script, VOICE_OPTIONS
+from app.services.ai_service import (
+    generate_podcast_script,
+    generate_podcast_script_from_text,
+    generate_podcast_dialogue,
+    generate_podcast_dialogue_from_text,
+    format_dialogue_script
+)
+from app.services.tts_service import (
+    generate_audio_from_script,
+    generate_dialogue_audio_from_turns,
+    VOICE_OPTIONS,
+    HOST_PAIR_OPTIONS
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +42,11 @@ def get_news_sources():
 def get_voices():
     """Retrieve available TTS voice options."""
     return VOICE_OPTIONS
+
+@router.get("/voices/host-pairs", response_model=List[schemas.HostPairOption])
+def get_host_pairs():
+    """Retrieve available dual-host voice pairs."""
+    return HOST_PAIR_OPTIONS
 
 @router.post("/news/fetch", response_model=dict)
 def trigger_news_fetch(background_tasks: BackgroundTasks):
@@ -57,6 +73,8 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
             return
             
         script = ""
+        is_dialogue = (request.format == "dialogue")
+        dialogue_turns = []
         voice = request.voice or "en-IN-NeerjaNeural"
 
         # Mode 1: Direct Text Input
@@ -85,12 +103,21 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
             db.commit()
 
             # Generate Script via AI from raw text
-            script = generate_podcast_script_from_text(
-                article_text=article_content,
-                tone=request.tone,
-                host_style=request.host_style,
-                title=request.title
-            )
+            if is_dialogue:
+                dialogue_turns = generate_podcast_dialogue_from_text(
+                    article_text=article_content,
+                    tone=request.tone,
+                    host_style=request.host_style,
+                    title=request.title
+                )
+                script = format_dialogue_script(dialogue_turns)
+            else:
+                script = generate_podcast_script_from_text(
+                    article_text=article_content,
+                    tone=request.tone,
+                    host_style=request.host_style,
+                    title=request.title
+                )
 
         # Mode 2: Live News Channel Outlet (The Hindu, NDTV, Times of India, etc.)
         elif request.source_mode in ["channel", "rss"] or request.source_id:
@@ -119,7 +146,11 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
             db.commit()
 
             # Generate Script via AI from fetched live articles
-            script = generate_podcast_script(articles, request.tone, request.host_style)
+            if is_dialogue:
+                dialogue_turns = generate_podcast_dialogue(articles, request.tone, request.host_style)
+                script = format_dialogue_script(dialogue_turns)
+            else:
+                script = generate_podcast_script(articles, request.tone, request.host_style)
 
         else:
             episode.status = "failed"
@@ -133,7 +164,18 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
 
         # 3. Generate Audio via TTS
         audio_filename = f"episode_{episode.id}.mp3"
-        audio_url = generate_audio_from_script(script, audio_filename, voice=voice)
+        if is_dialogue:
+            voice_a = request.voice_a or "en-IN-NeerjaNeural"
+            voice_b = request.voice_b or "en-IN-PrabhatNeural"
+            audio_url = generate_dialogue_audio_from_turns(
+                turns=dialogue_turns,
+                filename=audio_filename,
+                voice_a=voice_a,
+                voice_b=voice_b,
+                include_music=request.include_music
+            )
+        else:
+            audio_url = generate_audio_from_script(script, audio_filename, voice=voice)
         
         episode.audio_url = audio_url
         episode.status = "completed"

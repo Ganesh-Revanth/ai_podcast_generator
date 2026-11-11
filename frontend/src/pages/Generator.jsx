@@ -11,9 +11,12 @@ import {
   BookOpen, 
   Check,
   Newspaper,
-  Sliders
+  Sliders,
+  Users,
+  User,
+  Music
 } from 'lucide-react';
-import { generateEpisode, getVoices, getNewsSources, BASE_URL } from '../services/api';
+import { generateEpisode, getVoices, getNewsSources, getHostPairs, BASE_URL } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
 const SAMPLE_ARTICLES = [
@@ -111,12 +114,59 @@ const DEFAULT_SOURCES = [
   }
 ];
 
+const DEFAULT_HOST_PAIRS = [
+  {
+    id: "in_neerja_prabhat",
+    name: "Neerja & Prabhat",
+    description: "Engaging & professional Indian English co-hosts",
+    locale: "en-IN",
+    voice_a: "en-IN-NeerjaNeural",
+    voice_b: "en-IN-PrabhatNeural",
+    voice_a_name: "Neerja (Female)",
+    voice_b_name: "Prabhat (Male)"
+  },
+  {
+    id: "us_christopher_jenny",
+    name: "Christopher & Jenny",
+    description: "Authoritative broadcaster & warm modern journalist (US English)",
+    locale: "en-US",
+    voice_a: "en-US-ChristopherNeural",
+    voice_b: "en-US-JennyNeural",
+    voice_a_name: "Christopher (Male)",
+    voice_b_name: "Jenny (Female)"
+  },
+  {
+    id: "us_aria_guy",
+    name: "Aria & Guy",
+    description: "Expressive storyteller & friendly casual conversationalist (US English)",
+    locale: "en-US",
+    voice_a: "en-US-AriaNeural",
+    voice_b: "en-US-GuyNeural",
+    voice_a_name: "Aria (Female)",
+    voice_b_name: "Guy (Male)"
+  },
+  {
+    id: "gb_ryan_sonia",
+    name: "Ryan & Sonia",
+    description: "Polished & articulate British presenter duo (UK English)",
+    locale: "en-GB",
+    voice_a: "en-GB-RyanNeural",
+    voice_b: "en-GB-SoniaNeural",
+    voice_a_name: "Ryan (Male)",
+    voice_b_name: "Sonia (Female)"
+  }
+];
+
 const Generator = () => {
   const navigate = useNavigate();
   const [mode, setMode] = useState('channel'); // 'channel' or 'text'
+  const [format, setFormat] = useState('monologue'); // 'monologue' or 'dialogue'
   const [loading, setLoading] = useState(false);
   const [sources, setSources] = useState(DEFAULT_SOURCES);
   const [voices, setVoices] = useState([]);
+  const [hostPairs, setHostPairs] = useState(DEFAULT_HOST_PAIRS);
+  const [selectedPairId, setSelectedPairId] = useState('in_neerja_prabhat');
+  const [includeMusic, setIncludeMusic] = useState(true);
   
   const [selectedSourceId, setSelectedSourceId] = useState('the_hindu');
   const [selectedCategoryId, setSelectedCategoryId] = useState('national');
@@ -175,8 +225,21 @@ const Generator = () => {
       }
     };
 
+    // Load Dual-Host Pairs
+    const loadHostPairs = async () => {
+      try {
+        const res = await getHostPairs();
+        if (res.data && res.data.length > 0) {
+          setHostPairs(res.data);
+        }
+      } catch (err) {
+        console.warn('Using default host pairs fallback', err);
+      }
+    };
+
     loadSources();
     loadVoices();
+    loadHostPairs();
   }, []);
 
   const activeSource = sources.find(s => s.id === selectedSourceId) || sources[0];
@@ -231,11 +294,16 @@ const Generator = () => {
 
     setLoading(true);
     try {
+      const activePair = hostPairs.find(p => p.id === selectedPairId) || hostPairs[0];
       await generateEpisode({
         ...formData,
         source_mode: mode,
         source_id: selectedSourceId,
         category: selectedCategoryId,
+        format: format,
+        voice_a: activePair?.voice_a || 'en-IN-NeerjaNeural',
+        voice_b: activePair?.voice_b || 'en-IN-PrabhatNeural',
+        include_music: includeMusic,
         title: formData.title.trim() || `${activeSource?.name} Podcast Briefing`
       });
       // Navigate to library where user can listen to the audio
@@ -463,52 +531,180 @@ const Generator = () => {
           </div>
         )}
 
-        {/* Voice Selection (TTS) with Indian & Global Voices */}
+        {/* Podcast Format Selector (Monologue vs Dialogue) */}
         <div className="space-y-3 pt-6 border-t border-white/10">
-          <label className="block text-sm font-semibold text-gray-300 flex items-center gap-2">
-            <Volume2 size={16} className="text-primary"/> Narrator Voice (Edge-TTS Neural Speech)
+          <label className="block text-sm font-semibold text-gray-300 flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <Sliders size={16} className="text-primary"/> Podcast Format
+            </span>
+            <span className="text-xs text-gray-400">Choose single narrator or dual co-hosts</span>
           </label>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            {(voices.length > 0 ? voices : [
-              { id: 'en-IN-NeerjaNeural', name: 'Neerja', gender: 'Female', locale: 'en-IN', description: 'Expressive Indian English' },
-              { id: 'en-IN-PrabhatNeural', name: 'Prabhat', gender: 'Male', locale: 'en-IN', description: 'Authoritative Indian News Presenter' },
-              { id: 'en-US-ChristopherNeural', name: 'Christopher', gender: 'Male', locale: 'en-US', description: 'Deep & Authoritative' },
-              { id: 'en-US-AriaNeural', name: 'Aria', gender: 'Female', locale: 'en-US', description: 'Crisp & Expressive' }
-            ]).map(v => {
-              const isSelected = formData.voice === v.id;
-              const isIndian = v.locale === 'en-IN';
-              return (
-                <button
-                  type="button"
-                  key={v.id}
-                  onClick={() => setFormData({...formData, voice: v.id})}
-                  className={`p-3.5 rounded-2xl border text-left transition-all relative ${
-                    isSelected
-                      ? 'bg-primary/20 border-primary shadow-[0_0_20px_rgba(59,130,246,0.2)]'
-                      : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
-                  }`}
-                >
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="font-bold text-white text-sm flex items-center gap-1.5">
-                      {v.name}
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-normal ${
-                        isIndian ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30' : 'bg-white/10 text-gray-300'
-                      }`}>
-                        {isIndian ? '🇮🇳 ' + v.locale : v.locale}
-                      </span>
-                    </span>
-                    {isSelected && (
-                      <span className="w-5 h-5 rounded-full bg-primary flex items-center justify-center text-white">
-                        <Check size={12} />
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-400 line-clamp-2">{v.description}</p>
-                </button>
-              );
-            })}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <button
+              type="button"
+              onClick={() => setFormat('monologue')}
+              className={`p-4 rounded-2xl border text-left transition-all relative flex items-start gap-3.5 ${
+                format === 'monologue'
+                  ? 'bg-primary/20 border-primary shadow-[0_0_20px_rgba(59,130,246,0.2)]'
+                  : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+              }`}
+            >
+              <div className={`p-2.5 rounded-xl ${format === 'monologue' ? 'bg-primary text-white' : 'bg-white/5 text-gray-400'}`}>
+                <User size={20} />
+              </div>
+              <div className="space-y-1">
+                <div className="font-bold text-white text-base flex items-center gap-2">
+                  Monologue
+                  {format === 'monologue' && (
+                    <span className="text-[10px] bg-primary text-white px-2 py-0.5 rounded-full uppercase tracking-wider font-semibold">Active</span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  Solo news anchor delivering a structured, continuous news briefing.
+                </p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFormat('dialogue')}
+              className={`p-4 rounded-2xl border text-left transition-all relative flex items-start gap-3.5 ${
+                format === 'dialogue'
+                  ? 'bg-accent/20 border-accent shadow-[0_0_20px_rgba(168,85,247,0.25)]'
+                  : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+              }`}
+            >
+              <div className={`p-2.5 rounded-xl ${format === 'dialogue' ? 'bg-accent text-white' : 'bg-white/5 text-gray-400'}`}>
+                <Users size={20} />
+              </div>
+              <div className="space-y-1">
+                <div className="font-bold text-white text-base flex items-center gap-2">
+                  Dialogue (Dual Host)
+                  {format === 'dialogue' && (
+                    <span className="text-[10px] bg-accent text-white px-2 py-0.5 rounded-full uppercase tracking-wider font-semibold">Active</span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  Two co-hosts discussing stories with natural back-and-forth banter, pauses, and music.
+                </p>
+              </div>
+            </button>
           </div>
         </div>
+
+        {/* Voice Selection (TTS) */}
+        {format === 'dialogue' ? (
+          <div className="space-y-4 pt-6 border-t border-white/10">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+              <label className="block text-sm font-semibold text-gray-300 flex items-center gap-2">
+                <Users size={16} className="text-accent"/> Host Pair (Lead Anchor & Co-Host)
+              </label>
+              
+              {/* Optional Music Toggle */}
+              <label className="flex items-center gap-2 cursor-pointer bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-1.5 rounded-xl text-xs text-gray-300 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={includeMusic}
+                  onChange={(e) => setIncludeMusic(e.target.checked)}
+                  className="rounded border-gray-600 text-accent focus:ring-accent"
+                />
+                <Music size={14} className="text-accent" />
+                <span>Intro / Outro Music Branding</span>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              {hostPairs.map(pair => {
+                const isSelected = selectedPairId === pair.id;
+                const isIndian = pair.locale === 'en-IN';
+                return (
+                  <button
+                    type="button"
+                    key={pair.id}
+                    onClick={() => setSelectedPairId(pair.id)}
+                    className={`p-4 rounded-2xl border text-left transition-all relative ${
+                      isSelected
+                        ? 'bg-accent/20 border-accent shadow-[0_0_20px_rgba(168,85,247,0.2)]'
+                        : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+                    }`}
+                  >
+                    <div className="flex justify-between items-center mb-1.5">
+                      <span className="font-bold text-white text-sm flex items-center gap-2">
+                        {pair.name}
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-normal ${
+                          isIndian ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30' : 'bg-white/10 text-gray-300'
+                        }`}>
+                          {isIndian ? '🇮🇳 ' + pair.locale : pair.locale}
+                        </span>
+                      </span>
+                      {isSelected && (
+                        <span className="w-5 h-5 rounded-full bg-accent flex items-center justify-center text-white">
+                          <Check size={12} />
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-300 mb-2">{pair.description}</p>
+                    <div className="flex items-center gap-2 text-[11px] text-gray-400 pt-2 border-t border-white/5">
+                      <span className="px-2 py-0.5 rounded bg-white/5 border border-white/5 text-purple-300 font-medium">
+                        Host A: {pair.voice_a_name}
+                      </span>
+                      <span>+</span>
+                      <span className="px-2 py-0.5 rounded bg-white/5 border border-white/5 text-blue-300 font-medium">
+                        Host B: {pair.voice_b_name}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3 pt-6 border-t border-white/10">
+            <label className="block text-sm font-semibold text-gray-300 flex items-center gap-2">
+              <Volume2 size={16} className="text-primary"/> Narrator Voice (Edge-TTS Neural Speech)
+            </label>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              {(voices.length > 0 ? voices : [
+                { id: 'en-IN-NeerjaNeural', name: 'Neerja', gender: 'Female', locale: 'en-IN', description: 'Expressive Indian English' },
+                { id: 'en-IN-PrabhatNeural', name: 'Prabhat', gender: 'Male', locale: 'en-IN', description: 'Authoritative Indian News Presenter' },
+                { id: 'en-US-ChristopherNeural', name: 'Christopher', gender: 'Male', locale: 'en-US', description: 'Deep & Authoritative' },
+                { id: 'en-US-AriaNeural', name: 'Aria', gender: 'Female', locale: 'en-US', description: 'Crisp & Expressive' }
+              ]).map(v => {
+                const isSelected = formData.voice === v.id;
+                const isIndian = v.locale === 'en-IN';
+                return (
+                  <button
+                    type="button"
+                    key={v.id}
+                    onClick={() => setFormData({...formData, voice: v.id})}
+                    className={`p-3.5 rounded-2xl border text-left transition-all relative ${
+                      isSelected
+                        ? 'bg-primary/20 border-primary shadow-[0_0_20px_rgba(59,130,246,0.2)]'
+                        : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+                    }`}
+                  >
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="font-bold text-white text-sm flex items-center gap-1.5">
+                        {v.name}
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-normal ${
+                          isIndian ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30' : 'bg-white/10 text-gray-300'
+                        }`}>
+                          {isIndian ? '🇮🇳 ' + v.locale : v.locale}
+                        </span>
+                      </span>
+                      {isSelected && (
+                        <span className="w-5 h-5 rounded-full bg-primary flex items-center justify-center text-white">
+                          <Check size={12} />
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-400 line-clamp-2">{v.description}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Tone & Host Style */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-6 border-t border-white/10">

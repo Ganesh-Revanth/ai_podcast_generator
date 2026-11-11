@@ -24,6 +24,14 @@ def test_get_voices():
     assert len(data) > 0
     assert any("Neural" in v["id"] for v in data)
 
+def test_get_host_pairs():
+    response = client.get("/api/voices/host-pairs")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) > 0
+    assert any("neerja" in p["id"] for p in data)
+    assert all("voice_a" in p and "voice_b" in p for p in data)
+
 def test_channel_returns_no_articles_fails_with_clear_error():
     db = SessionLocal()
     try:

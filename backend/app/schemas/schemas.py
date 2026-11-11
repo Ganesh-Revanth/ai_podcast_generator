@@ -39,6 +39,20 @@ class VoiceOption(BaseModel):
     locale: str
     description: str
 
+class HostPairOption(BaseModel):
+    id: str
+    name: str
+    description: str
+    locale: str
+    voice_a: str
+    voice_b: str
+    voice_a_name: str
+    voice_b_name: str
+
+class DialogueTurn(BaseModel):
+    speaker: str # "A" or "B"
+    text: str
+
 class EpisodeGenerateRequest(BaseModel):
     title: str = "AI News Briefing"
     source_mode: str = "channel" # "text" or "channel"
@@ -46,6 +60,10 @@ class EpisodeGenerateRequest(BaseModel):
     category: Optional[str] = "national"
     article_text: Optional[str] = None
     voice: Optional[str] = "en-IN-NeerjaNeural"
+    format: str = "monologue" # "monologue" or "dialogue"
+    voice_a: Optional[str] = "en-IN-NeerjaNeural"
+    voice_b: Optional[str] = "en-IN-PrabhatNeural"
+    include_music: bool = True
     num_stories: int = 5
     categories: List[str] = [] # backwards compatibility
     tone: str = "professional"

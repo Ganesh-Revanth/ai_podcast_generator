@@ -33,6 +33,10 @@ export const getVoices = () => {
   return api.get('/voices');
 };
 
+export const getHostPairs = () => {
+  return api.get('/voices/host-pairs');
+};
+
 export const getNewsSources = () => {
   return api.get('/news/sources');
 };

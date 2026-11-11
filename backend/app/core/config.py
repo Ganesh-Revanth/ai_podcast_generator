@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     
     # Storage
     AUDIO_STORAGE_DIR: str = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "audio")
+    MUSIC_STORAGE_DIR: str = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "music")
 
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
@@ -24,5 +25,6 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# Ensure audio storage dir exists
+# Ensure storage dirs exist
 os.makedirs(settings.AUDIO_STORAGE_DIR, exist_ok=True)
+os.makedirs(settings.MUSIC_STORAGE_DIR, exist_ok=True)
