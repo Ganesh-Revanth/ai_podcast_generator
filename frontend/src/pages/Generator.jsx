@@ -304,6 +304,7 @@ const Generator = () => {
         voice_a: activePair?.voice_a || 'en-IN-NeerjaNeural',
         voice_b: activePair?.voice_b || 'en-IN-PrabhatNeural',
         include_music: includeMusic,
+        target_minutes: formData.target_minutes || 5,
         title: formData.title.trim() || `${activeSource?.name} Podcast Briefing`
       });
       // Navigate to library where user can listen to the audio

@@ -1,9 +1,10 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Mic, LayoutDashboard, History, Sparkles } from 'lucide-react';
+import { Mic, LayoutDashboard, History, Sparkles, Radio } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import Generator from './pages/Generator';
 import Player from './pages/Player';
+import Shows from './pages/Shows';
 
 const Sidebar = () => {
   const location = useLocation();
@@ -11,6 +12,7 @@ const Sidebar = () => {
 
   const links = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
+    { name: 'Shows', path: '/shows', icon: Radio },
     { name: 'Generate', path: '/generator', icon: Sparkles },
     { name: 'History', path: '/history', icon: History },
   ];
@@ -64,6 +66,7 @@ function App() {
           <div className="max-w-6xl mx-auto animate-fade-in">
             <Routes>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/shows" element={<Shows />} />
               <Route path="/generator" element={<Generator />} />
               <Route path="/history" element={<Player />} />
             </Routes>

@@ -1,8 +1,32 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Float, Table
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Float, Table, Boolean
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 
 Base = declarative_base()
+
+class Show(Base):
+    __tablename__ = "shows"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    source_id = Column(String, default="the_hindu")
+    category = Column(String, default="national")
+    topics = Column(String, nullable=True) # e.g. "tech, economy, politics"
+    tone = Column(String, default="professional")
+    format = Column(String, default="monologue") # monologue or dialogue
+    voice = Column(String, default="en-IN-NeerjaNeural")
+    voice_a = Column(String, default="en-IN-NeerjaNeural")
+    voice_b = Column(String, default="en-IN-PrabhatNeural")
+    target_minutes = Column(Integer, default=5)
+    schedule = Column(String, default="daily:08:00")
+    enabled = Column(Boolean, default=True)
+    last_run_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationship
+    episodes = relationship("Episode", back_populates="show", cascade="all, delete-orphan")
 
 # Association table for many-to-many relationship between episodes and articles
 episode_article_association = Table(
@@ -37,7 +61,9 @@ class Episode(Base):
     script = Column(Text, nullable=True)
     audio_url = Column(String, nullable=True) # relative path to the audio file
     error_message = Column(Text, nullable=True)
+    show_id = Column(Integer, ForeignKey("shows.id"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
-    # Relationship
+    # Relationships
+    show = relationship("Show", back_populates="episodes")
     articles = relationship("Article", secondary=episode_article_association)

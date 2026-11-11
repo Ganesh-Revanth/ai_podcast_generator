@@ -44,3 +44,33 @@ export const getNewsSources = () => {
 export const deleteEpisode = (id) => {
   return api.delete(`/episodes/${id}`);
 };
+
+// Shows API
+export const getShows = () => {
+  return api.get('/shows');
+};
+
+export const getShow = (id) => {
+  return api.get(`/shows/${id}`);
+};
+
+export const createShow = (data) => {
+  return api.post('/shows', data);
+};
+
+export const updateShow = (id, data) => {
+  return api.put(`/shows/${id}`, data);
+};
+
+export const deleteShow = (id) => {
+  return api.delete(`/shows/${id}`);
+};
+
+export const toggleShow = (id) => {
+  return api.post(`/shows/${id}/toggle`);
+};
+
+export const runShow = (id) => {
+  return api.post(`/shows/${id}/run`);
+};
+

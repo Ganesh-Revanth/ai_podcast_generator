@@ -13,3 +13,6 @@ beautifulsoup4==4.12.3
 httpx<0.28
 pytz==2024.1
 pydub==0.25.1
+apscheduler==3.11.3
+tzlocal==5.4.5
+

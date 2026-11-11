@@ -106,7 +106,29 @@ def clean_script_for_tts(text: str) -> str:
     lines = [line.strip() for line in cleaned.split('\n') if line.strip()]
     return "\n\n".join(lines)
 
-def generate_podcast_script_from_text(article_text: str, tone: str = "professional", host_style: str = "informative", title: Optional[str] = None) -> str:
+def calculate_story_count(target_minutes: Optional[int] = 5) -> int:
+    """Computes the recommended story count for the given target duration in minutes."""
+    mins = target_minutes if (target_minutes and target_minutes > 0) else 5
+    # ~1.25 to 1.5 min per story in briefings
+    count = round(mins * 0.75)
+    return max(1, min(10, count))
+
+def calculate_word_budget(target_minutes: Optional[int] = 5) -> int:
+    """Computes the target spoken word budget based on ~140 WPM spoken pace."""
+    mins = target_minutes if (target_minutes and target_minutes > 0) else 5
+    return max(150, mins * 140)
+
+def calculate_max_tokens(word_budget: int) -> int:
+    """Calculates dynamic max_tokens for OpenAI completion based on word budget."""
+    return min(4096, max(1000, int(word_budget * 1.4) + 350))
+
+def generate_podcast_script_from_text(
+    article_text: str,
+    tone: str = "professional",
+    host_style: str = "informative",
+    title: Optional[str] = None,
+    target_minutes: Optional[int] = 5
+) -> str:
     """
     Uses an LLM to transform a raw news article into an engaging podcast script monologue.
     """
@@ -114,6 +136,9 @@ def generate_podcast_script_from_text(article_text: str, tone: str = "profession
         return "Welcome to today's news update. There is no news article content provided for today. Thank you for listening."
         
     client = get_llm_client()
+    word_budget = calculate_word_budget(target_minutes)
+    max_tokens = calculate_max_tokens(word_budget)
+    mins = target_minutes or 5
     
     title_context = f"Topic / Title: {title}\n" if title else ""
     
@@ -121,14 +146,16 @@ def generate_podcast_script_from_text(article_text: str, tone: str = "profession
     You are an expert podcast host and journalist.
     Tone: {tone}
     Host Style: {host_style}
+    Target Duration: approximately {mins} minutes (~{word_budget} words total).
     
-    Your task is to take the provided news article text and adapt it into a compelling, conversational podcast episode script.
+    Your task is to take the provided news article text and adapt it into a compelling, conversational podcast episode script matching the target duration.
     Guidelines:
     1. Hook the listener with a catchy opening line welcoming them to the show.
     2. Summarize and unpack the key facts, context, implications, and takeaways from the article in a natural speaking voice.
     3. Ensure seamless transitions between different points.
-    4. Conclude with a memorable closing sign-off.
-    5. CRITICAL: Output ONLY the spoken narration. DO NOT include speaker tags (e.g., 'Host:'), sound effects (e.g., '[Upbeat Music]'), or stage directions.
+    4. Aim for approximately {word_budget} spoken words so the audio matches the requested ~{mins} minute length.
+    5. Conclude with a memorable closing sign-off.
+    6. CRITICAL: Output ONLY the spoken narration. DO NOT include speaker tags (e.g., 'Host:'), sound effects (e.g., '[Upbeat Music]'), or stage directions.
     """
     
     try:
@@ -139,7 +166,7 @@ def generate_podcast_script_from_text(article_text: str, tone: str = "profession
                 {"role": "user", "content": f"{title_context}Here is the news article text to transform:\n\n{article_text}"}
             ],
             temperature=0.7,
-            max_tokens=2500
+            max_tokens=max_tokens
         )
         raw_script = response.choices[0].message.content
         return clean_script_for_tts(raw_script)
@@ -151,14 +178,22 @@ def generate_podcast_script_from_text(article_text: str, tone: str = "profession
         episode_title = title if title else "Today's Top Story"
         return f"Welcome to today's audio briefing. In our top story, {episode_title}. {first_part}. Thank you for tuning in to this news update. Have a wonderful day."
 
-def generate_podcast_script(articles: List[models.Article], tone: str = "professional", host_style: str = "informative") -> str:
+def generate_podcast_script(
+    articles: List[models.Article],
+    tone: str = "professional",
+    host_style: str = "informative",
+    target_minutes: Optional[int] = 5
+) -> str:
     """
-    Uses an LLM to generate a podcast script from a list of articles.
+    Uses an LLM to generate a podcast script from a list of articles scaled to target_minutes.
     """
     if not articles:
         return "Welcome to the podcast. We have no news for you today. Goodbye!"
         
     client = get_llm_client()
+    word_budget = calculate_word_budget(target_minutes)
+    max_tokens = calculate_max_tokens(word_budget)
+    mins = target_minutes or 5
     
     # Prepare article text
     articles_text = ""
@@ -171,12 +206,14 @@ def generate_podcast_script(articles: List[models.Article], tone: str = "profess
     You are an AI generating a script for a news podcast.
     Tone: {tone}
     Host Style: {host_style}
+    Target Duration: approximately {mins} minutes (~{word_budget} words total).
     
-    Your task is to take the provided news stories and write a seamless podcast script.
+    Your task is to take the provided news stories and write a seamless podcast script matching the requested target duration.
     It should include:
-    - An opening intro.
+    - An opening intro welcoming listeners.
     - Summaries and context for each story, presented naturally as a human host would.
     - Smooth transitions between stories.
+    - Aim for approximately {word_budget} spoken words across the stories.
     - A closing outro.
     
     Output ONLY the spoken script. Do not include stage directions, sound effects, or speaker tags (like 'Host:').
@@ -191,7 +228,7 @@ def generate_podcast_script(articles: List[models.Article], tone: str = "profess
                 {"role": "user", "content": f"Here are the stories:\n{articles_text}"}
             ],
             temperature=0.7,
-            max_tokens=2000
+            max_tokens=max_tokens
         )
         raw_script = response.choices[0].message.content
         return clean_script_for_tts(raw_script)
@@ -280,10 +317,11 @@ def generate_podcast_dialogue_from_text(
     article_text: str,
     tone: str = "professional",
     host_style: str = "conversational",
-    title: Optional[str] = None
+    title: Optional[str] = None,
+    target_minutes: Optional[int] = 5
 ) -> List[Dict[str, str]]:
     """
-    Uses an LLM to transform raw news article text into a structured two-host dialogue.
+    Uses an LLM to transform raw news article text into a structured two-host dialogue scaled to target_minutes.
     Returns a list of turns: [{"speaker": "A", "text": "..."}, {"speaker": "B", "text": "..."}]
     """
     if not article_text or not article_text.strip():
@@ -293,6 +331,11 @@ def generate_podcast_dialogue_from_text(
         ]
 
     client = get_llm_client()
+    word_budget = calculate_word_budget(target_minutes)
+    max_tokens = calculate_max_tokens(word_budget)
+    mins = target_minutes or 5
+    estimated_turns = max(4, min(30, round(word_budget / 55)))
+
     title_context = f"Topic / Title: {title}\n" if title else ""
 
     system_prompt = f"""
@@ -301,6 +344,7 @@ def generate_podcast_dialogue_from_text(
     Host B is the analyst and co-host who provides context, reacts, offers additional details, and asks natural follow-up questions.
     Tone: {tone}
     Host Style: {host_style}
+    Target Duration: approximately {mins} minutes (~{word_budget} words total).
 
     Your task is to take the provided news article text and adapt it into a lively, natural back-and-forth dialogue between Host A and Host B.
 
@@ -317,7 +361,7 @@ def generate_podcast_dialogue_from_text(
     ]
 
     Rules:
-    1. Write natural conversational dialogue with approximately 6 to 12 alternating turns.
+    1. Write natural conversational dialogue with approximately {estimated_turns} alternating turns, totaling ~{word_budget} spoken words.
     2. Do NOT include speaker labels, stage directions, or audio cues inside the "text" string.
     3. Ground all statements strictly in the facts from the source text.
     """
@@ -330,7 +374,7 @@ def generate_podcast_dialogue_from_text(
                 {"role": "user", "content": f"{title_context}Here is the news article text to transform:\n\n{article_text}"}
             ],
             temperature=0.7,
-            max_tokens=2500
+            max_tokens=max_tokens
         )
         raw_output = response.choices[0].message.content
         return parse_dialogue_json(raw_output)
@@ -352,10 +396,11 @@ def generate_podcast_dialogue_from_text(
 def generate_podcast_dialogue(
     articles: List[models.Article],
     tone: str = "professional",
-    host_style: str = "conversational"
+    host_style: str = "conversational",
+    target_minutes: Optional[int] = 5
 ) -> List[Dict[str, str]]:
     """
-    Uses an LLM to transform multiple news articles into a structured two-host dialogue.
+    Uses an LLM to transform multiple news articles into a structured two-host dialogue scaled to target_minutes.
     Returns a list of turns: [{"speaker": "A", "text": "..."}, {"speaker": "B", "text": "..."}]
     """
     if not articles:
@@ -365,6 +410,10 @@ def generate_podcast_dialogue(
         ]
 
     client = get_llm_client()
+    word_budget = calculate_word_budget(target_minutes)
+    max_tokens = calculate_max_tokens(word_budget)
+    mins = target_minutes or 5
+    estimated_turns = max(6, min(30, round(word_budget / 55)))
 
     articles_text = ""
     for idx, article in enumerate(articles):
@@ -378,8 +427,9 @@ def generate_podcast_dialogue(
     Host B is the analyst and co-host (providing perspective, breaking down key statistics, and reacting with color).
     Tone: {tone}
     Host Style: {host_style}
+    Target Duration: approximately {mins} minutes (~{word_budget} words total).
 
-    Your task is to take the provided stories and adapt them into a smooth, natural two-host dialogue.
+    Your task is to take the provided stories and adapt them into a smooth, natural two-host dialogue matching the target duration.
 
     CRITICAL INSTRUCTION - STRICT JSON OUTPUT:
     You MUST output ONLY a valid JSON array of objects. Do not include markdown formatting, code fences, or any commentary outside the JSON array.
@@ -394,7 +444,7 @@ def generate_podcast_dialogue(
     ]
 
     Rules:
-    1. Write natural conversational dialogue with approximately 6 to 14 alternating turns covering the stories.
+    1. Write natural conversational dialogue with approximately {estimated_turns} alternating turns covering the stories, totaling ~{word_budget} spoken words.
     2. Do NOT include speaker labels, stage directions, or audio cues inside the "text" string.
     3. Ground all statements strictly in the facts from the source stories.
     """
@@ -407,9 +457,10 @@ def generate_podcast_dialogue(
                 {"role": "user", "content": f"Here are the news stories to cover:\n{articles_text}"}
             ],
             temperature=0.7,
-            max_tokens=2500
+            max_tokens=max_tokens
         )
         raw_output = response.choices[0].message.content
+        return parse_dialogue_json(raw_output)
         return parse_dialogue_json(raw_output)
     except Exception as e:
         logger.error(f"LLM Error during multi-article dialogue generation: {e}")
