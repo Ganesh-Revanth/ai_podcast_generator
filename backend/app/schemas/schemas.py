@@ -128,6 +128,7 @@ class EpisodeBase(BaseModel):
     show_id: Optional[int] = None
     fact_check_status: Optional[str] = "unverified" # "passed", "flagged", "unverified"
     fact_check_flags: Optional[str] = None # JSON string of flags
+    transcript_segments: Optional[str] = None # JSON string of timed segments [{start, end, speaker, text}]
 
 class Episode(EpisodeBase):
     id: int

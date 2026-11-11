@@ -11,7 +11,9 @@ import {
   RefreshCw, 
   Users, 
   User, 
-  X
+  X,
+  Rss,
+  Check
 } from 'lucide-react';
 import { 
   getShows, 
@@ -22,7 +24,8 @@ import {
   runShow, 
   getNewsSources, 
   getVoices, 
-  getHostPairs 
+  getHostPairs,
+  getShowFeedUrl
 } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
@@ -57,6 +60,15 @@ const Shows = () => {
 
   // Running action indicator
   const [runningShowId, setRunningShowId] = useState(null);
+  const [copiedShowId, setCopiedShowId] = useState(null);
+
+  const handleCopyFeed = (showId) => {
+    const url = getShowFeedUrl(showId);
+    navigator.clipboard.writeText(url);
+    setCopiedShowId(showId);
+    showNotification('Show RSS Feed URL copied to clipboard! Ready to paste into any podcast app.');
+    setTimeout(() => setCopiedShowId(null), 2500);
+  };
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -440,6 +452,15 @@ const Shows = () => {
                       <Play size={14} className="fill-current" />
                     )}
                     {isRunning ? 'Starting...' : 'Run Now'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleCopyFeed(show.id)}
+                    className="p-2 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/20 transition-colors cursor-pointer"
+                    title={copiedShowId === show.id ? 'Copied RSS Feed URL!' : 'Copy Apple Podcasts / RSS Feed URL'}
+                  >
+                    {copiedShowId === show.id ? <Check size={15} className="text-emerald-400" /> : <Rss size={15} />}
                   </button>
 
                   <button

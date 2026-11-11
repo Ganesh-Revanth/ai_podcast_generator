@@ -64,6 +64,7 @@ class Episode(Base):
     show_id = Column(Integer, ForeignKey("shows.id"), nullable=True, index=True)
     fact_check_status = Column(String, default="unverified") # unverified, passed, flagged
     fact_check_flags = Column(Text, nullable=True) # JSON array of flagged claims
+    transcript_segments = Column(Text, nullable=True) # JSON array of timed segments: [{"start": 0.0, "end": 4.5, "speaker": "A", "text": "..."}]
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Relationships

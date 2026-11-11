@@ -46,3 +46,4 @@ def test_cluster_articles_by_topic():
 
 def test_cluster_articles_empty():
     assert cluster_articles_by_topic([]) == []
+

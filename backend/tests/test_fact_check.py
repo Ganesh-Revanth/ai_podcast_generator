@@ -90,3 +90,4 @@ def test_fact_check_script_passed():
         status, flags = fact_check_script(script, [article])
         assert status == "passed"
         assert len(flags) == 0
+

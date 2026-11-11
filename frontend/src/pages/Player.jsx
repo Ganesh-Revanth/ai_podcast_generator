@@ -11,29 +11,53 @@ import {
   Check, 
   Trash2, 
   Sparkles, 
-  Plus,
-  BookOpen,
-  ExternalLink,
-  ShieldCheck,
-  ShieldAlert
+  Plus, 
+  BookOpen, 
+  ExternalLink, 
+  ShieldCheck, 
+  ShieldAlert,
+  Play,
+  Pause,
+  ListPlus,
+  Rss
 } from 'lucide-react';
-import { getEpisodes, deleteEpisode, BASE_URL } from '../services/api';
+import { getEpisodes, deleteEpisode, getGlobalFeedUrl, BASE_URL } from '../services/api';
+import { useAudioPlayer } from '../context/AudioPlayerContext';
+import PipelineStepper from '../components/PipelineStepper';
+import SynchronizedTranscript from '../components/SynchronizedTranscript';
 import { Link } from 'react-router-dom';
+
+const formatDuration = (secs) => {
+  if (!secs || isNaN(secs)) return '00:00';
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+};
 
 const Player = () => {
   const [episodes, setEpisodes] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [expandedScript, setExpandedScript] = useState(null);
+  const [expandedTranscript, setExpandedTranscript] = useState(null);
   const [expandedNotes, setExpandedNotes] = useState(null);
   const [expandedFactCheck, setExpandedFactCheck] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+  const [copiedFeed, setCopiedFeed] = useState(false);
+
+  const {
+    currentEpisode,
+    isPlaying,
+    currentTime,
+    playEpisode,
+    seek,
+    addToQueue
+  } = useAudioPlayer();
 
   const fetchEpisodes = async () => {
     try {
       const response = await getEpisodes();
       setEpisodes(response.data);
     } catch (error) {
-      console.error("Failed to fetch episodes", error);
+      console.error('Failed to fetch episodes', error);
     } finally {
       setLoading(false);
     }
@@ -41,18 +65,10 @@ const Player = () => {
 
   useEffect(() => {
     fetchEpisodes();
-    // Poll every 4 seconds if there are pending episodes
-    const interval = setInterval(() => {
-      if (episodes.some(ep => ep.status === 'pending' || ep.status === 'script_generated')) {
-        fetchEpisodes();
-      }
-    }, 4000);
-    
-    return () => clearInterval(interval);
-  }, [episodes]);
+  }, []);
 
-  const toggleScript = (id) => {
-    setExpandedScript(expandedScript === id ? null : id);
+  const toggleTranscript = (id) => {
+    setExpandedTranscript(expandedTranscript === id ? null : id);
   };
 
   const toggleNotes = (id) => {
@@ -69,13 +85,20 @@ const Player = () => {
     setTimeout(() => setCopiedId(null), 2500);
   };
 
+  const handleCopyGlobalFeed = () => {
+    const feedUrl = getGlobalFeedUrl();
+    navigator.clipboard.writeText(feedUrl);
+    setCopiedFeed(true);
+    setTimeout(() => setCopiedFeed(false), 2500);
+  };
+
   const handleDelete = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this podcast episode?")) return;
+    if (!window.confirm('Are you sure you want to delete this podcast episode?')) return;
     try {
       await deleteEpisode(id);
-      setEpisodes(prev => prev.filter(ep => ep.id !== id));
+      setEpisodes((prev) => prev.filter((ep) => ep.id !== id));
     } catch (err) {
-      console.error("Failed to delete episode", err);
+      console.error('Failed to delete episode', err);
     }
   };
 
@@ -86,12 +109,23 @@ const Player = () => {
           <h1 className="text-4xl font-extrabold text-white mb-2 tracking-tight">Podcast Library</h1>
           <p className="text-gray-400 text-lg">Listen to, read, and manage your AI-synthesized news podcasts.</p>
         </div>
-        <Link 
-          to="/generator" 
-          className="btn-primary py-2.5 px-5 text-sm font-semibold rounded-xl flex items-center gap-2"
-        >
-          <Plus size={16} /> New Podcast
-        </Link>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleCopyGlobalFeed}
+            className="px-4 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-gray-200 hover:text-white text-sm font-semibold flex items-center gap-2 transition-all cursor-pointer shadow-sm"
+            title="Copy Apple Podcasts / RSS 2.0 feed link"
+          >
+            <Rss size={16} className="text-orange-400" />
+            {copiedFeed ? 'Copied RSS URL!' : 'Subscribe via RSS'}
+          </button>
+          <Link 
+            to="/generator" 
+            className="btn-primary py-2.5 px-5 text-sm font-semibold rounded-xl flex items-center gap-2"
+          >
+            <Plus size={16} /> New Podcast
+          </Link>
+        </div>
       </header>
 
       {loading ? (
@@ -123,23 +157,47 @@ const Player = () => {
             } catch {
               parsedFlags = [];
             }
-            
+
+            const isCurrentPlaying = currentEpisode && currentEpisode.id === episode.id && isPlaying;
+            const isLoadedInPlayer = currentEpisode && currentEpisode.id === episode.id;
+            const isPendingOrRunning = episode.status === 'pending' || episode.status === 'script_generated';
+
             return (
               <div 
                 key={episode.id} 
-                className="glass-panel overflow-hidden transition-all duration-300 hover:border-primary/30 rounded-3xl border border-white/10 shadow-lg"
+                className={`glass-panel overflow-hidden transition-all duration-300 rounded-3xl border shadow-lg ${
+                  isLoadedInPlayer
+                    ? 'border-primary/50 shadow-[0_0_25px_rgba(59,130,246,0.2)]'
+                    : 'border-white/10 hover:border-primary/30'
+                }`}
               >
                 <div className="p-6 md:p-8 flex flex-col md:flex-row gap-6 items-start md:items-center">
                   
-                  {/* Artwork / Icon Badge */}
+                  {/* Artwork / Play Button Overlay */}
                   <div className="w-24 h-24 md:w-28 md:h-28 flex-shrink-0 bg-gradient-to-br from-gray-800 via-gray-900 to-black rounded-2xl border border-white/10 flex items-center justify-center shadow-lg relative overflow-hidden group">
                     <div className="absolute inset-0 bg-gradient-to-tr from-primary/30 to-accent/30 opacity-40 group-hover:opacity-80 transition-opacity"></div>
-                    <Headphones size={38} className="text-white group-hover:scale-110 transition-transform duration-500 z-10" />
+                    
+                    {episode.status === 'completed' && episode.audio_url ? (
+                      <button
+                        type="button"
+                        onClick={() => playEpisode(episode)}
+                        className="w-14 h-14 rounded-full bg-primary/90 text-white flex items-center justify-center shadow-xl group-hover:scale-110 active:scale-95 transition-all z-20 cursor-pointer"
+                        title={isCurrentPlaying ? 'Pause' : 'Play this episode'}
+                      >
+                        {isCurrentPlaying ? (
+                          <Pause size={24} className="fill-white" />
+                        ) : (
+                          <Play size={24} className="fill-white ml-1" />
+                        )}
+                      </button>
+                    ) : (
+                      <Headphones size={38} className="text-white z-10" />
+                    )}
                     
                     {episode.status === 'completed' && (
                       <div className="absolute top-2.5 right-2.5 w-3.5 h-3.5 bg-emerald-500 rounded-full shadow-[0_0_12px_rgba(16,185,129,0.9)] z-20"></div>
                     )}
-                    {(episode.status === 'pending' || episode.status === 'script_generated') && (
+                    {isPendingOrRunning && (
                       <div className="absolute top-2.5 right-2.5 w-3.5 h-3.5 bg-yellow-500 rounded-full animate-ping shadow-[0_0_12px_rgba(234,179,8,0.9)] z-20"></div>
                     )}
                     {episode.status === 'failed' && (
@@ -159,8 +217,8 @@ const Player = () => {
                           }`}>
                             {isCustomArticle ? 'Article Text Input' : 'RSS News Feed'}
                           </span>
-                          <span className="text-xs text-gray-500 flex items-center gap-1">
-                            <Clock size={12} /> {new Date(episode.created_at).toLocaleString()}
+                          <span className="text-xs text-gray-400 flex items-center gap-1">
+                            <Clock size={12} /> {formatDuration(episode.duration_seconds)} • {new Date(episode.created_at).toLocaleString()}
                           </span>
                         </div>
                         <h3 className="text-xl md:text-2xl font-bold text-white leading-snug">
@@ -196,7 +254,7 @@ const Player = () => {
                             Ready
                           </span>
                         )}
-                        {(episode.status === 'pending' || episode.status === 'script_generated') && (
+                        {isPendingOrRunning && (
                           <span className="px-3 py-1 bg-yellow-500/20 text-yellow-400 text-xs font-bold rounded-full border border-yellow-500/30 uppercase tracking-wider flex items-center gap-2">
                             <div className="w-2 h-2 bg-yellow-400 rounded-full animate-ping"></div> Synthesizing...
                           </span>
@@ -206,26 +264,45 @@ const Player = () => {
                             <span className="px-3 py-1 bg-red-500/20 text-red-400 text-xs font-bold rounded-full border border-red-500/30 uppercase tracking-wider flex items-center gap-1">
                               <AlertCircle size={14}/> Failed
                             </span>
-                            {episode.error_message && (
-                              <span className="text-xs text-red-400/90 text-right max-w-xs md:max-w-md truncate" title={episode.error_message}>
-                                {episode.error_message}
-                              </span>
-                            )}
                           </div>
                         )}
                       </div>
                     </div>
 
-                    {/* Audio Player */}
-                    {episode.status === 'completed' && episode.audio_url && (
+                    {/* Progress Stepper for Pending/Running Episodes (SSE Powered, Replaces Polling) */}
+                    {isPendingOrRunning && (
                       <div className="pt-2">
-                        <audio 
-                          controls 
-                          className="w-full h-11 bg-white/5 border border-white/10 rounded-xl"
+                        <PipelineStepper 
+                          episodeId={episode.id} 
+                          onComplete={() => fetchEpisodes()} 
+                          onFail={() => fetchEpisodes()} 
+                        />
+                      </div>
+                    )}
+
+                    {/* Quick Play Controls when Completed */}
+                    {episode.status === 'completed' && episode.audio_url && (
+                      <div className="pt-2 flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => playEpisode(episode)}
+                          className={`px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+                            isCurrentPlaying
+                              ? 'bg-primary text-white shadow-lg shadow-primary/30'
+                              : 'bg-white/10 hover:bg-white/15 text-white'
+                          }`}
                         >
-                          <source src={`${BASE_URL}${episode.audio_url}`} type="audio/mpeg" />
-                          Your browser does not support audio playback.
-                        </audio>
+                          {isCurrentPlaying ? <Pause size={16} /> : <Play size={16} />}
+                          {isCurrentPlaying ? 'Pause Episode' : 'Play Episode'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => addToQueue(episode)}
+                          className="px-3.5 py-2 rounded-xl text-sm font-medium bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 transition-colors flex items-center gap-1.5 cursor-pointer"
+                          title="Add to player queue"
+                        >
+                          <ListPlus size={16} /> Add to Queue
+                        </button>
                       </div>
                     )}
                   </div>
@@ -234,15 +311,21 @@ const Player = () => {
                 {/* Actions Bar */}
                 <div className="border-t border-white/5 bg-black/30 p-4 px-6 md:px-8 flex flex-wrap justify-between items-center gap-4">
                   <div className="flex flex-wrap items-center gap-3">
+                    {/* Synchronized Transcript Toggle */}
                     <button 
-                      onClick={() => toggleScript(episode.id)}
-                      className="flex items-center gap-2 text-sm text-gray-300 hover:text-white font-medium transition-colors bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/10 cursor-pointer"
+                      onClick={() => toggleTranscript(episode.id)}
+                      className={`flex items-center gap-2 text-sm font-medium transition-colors px-3 py-1.5 rounded-lg border cursor-pointer ${
+                        expandedTranscript === episode.id
+                          ? 'bg-primary text-white border-primary shadow-sm'
+                          : 'bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border-white/10'
+                      }`}
                     >
-                      <FileText size={16} className="text-primary" />
-                      {expandedScript === episode.id ? 'Hide Script' : 'Read Podcast Script'}
-                      {expandedScript === episode.id ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+                      <FileText size={16} className={expandedTranscript === episode.id ? 'text-white' : 'text-primary'} />
+                      {expandedTranscript === episode.id ? 'Hide Transcript' : 'Synchronized Transcript'}
+                      {expandedTranscript === episode.id ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
                     </button>
 
+                    {/* Show Notes */}
                     {episode.articles && episode.articles.length > 0 && (
                       <button 
                         onClick={() => toggleNotes(episode.id)}
@@ -254,6 +337,7 @@ const Player = () => {
                       </button>
                     )}
 
+                    {/* Copy Plain Script */}
                     {episode.script && (
                       <button
                         onClick={() => handleCopyScript(episode.id, episode.script)}
@@ -268,7 +352,7 @@ const Player = () => {
                         ) : (
                           <>
                             <Copy size={14} />
-                            <span>Copy</span>
+                            <span>Copy Script</span>
                           </>
                         )}
                       </button>
@@ -297,6 +381,32 @@ const Player = () => {
                     </button>
                   </div>
                 </div>
+
+                {/* Synchronized Live Highlighting Transcript Drawer */}
+                {expandedTranscript === episode.id && (
+                  <div className="p-6 md:p-8 bg-black/50 border-t border-white/10 animate-slide-up space-y-4">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <FileText size={18} className="text-primary"/>
+                        <h4 className="text-white font-bold text-base">Synchronized Spoken Transcript</h4>
+                      </div>
+                      <span className="text-xs text-gray-400">
+                        Click any line to jump audio directly to that moment
+                      </span>
+                    </div>
+
+                    <SynchronizedTranscript
+                      episode={episode}
+                      currentTime={isCurrentPlaying ? currentTime : 0}
+                      onSeek={(seekSec) => {
+                        if (!isCurrentPlaying) {
+                          playEpisode(episode);
+                        }
+                        seek(seekSec);
+                      }}
+                    />
+                  </div>
+                )}
 
                 {/* Show Notes & Sources Drawer */}
                 {expandedNotes === episode.id && episode.articles && (
@@ -404,26 +514,6 @@ const Player = () => {
                     </div>
                   </div>
                 )}
-
-                {/* Script Expansion Drawer */}
-                {expandedScript === episode.id && episode.script && (
-                  <div className="p-6 md:p-8 bg-black/50 border-t border-white/10 animate-slide-up">
-                    <div className="flex justify-between items-center mb-4">
-                      <h4 className="text-white font-bold flex items-center gap-2 text-base">
-                        <FileText size={18} className="text-primary"/> Spoken Narration Script
-                      </h4>
-                      <button
-                        onClick={() => handleCopyScript(episode.id, episode.script)}
-                        className="text-xs text-primary hover:underline flex items-center gap-1 font-medium"
-                      >
-                        {copiedId === episode.id ? 'Copied to clipboard' : 'Copy entire script'}
-                      </button>
-                    </div>
-                    <div className="bg-white/5 p-5 rounded-2xl border border-white/5 text-gray-200 text-sm md:text-base leading-relaxed space-y-4 font-sans whitespace-pre-wrap">
-                      {episode.script}
-                    </div>
-                  </div>
-                )}
               </div>
             );
           })}
@@ -434,4 +524,3 @@ const Player = () => {
 };
 
 export default Player;
-

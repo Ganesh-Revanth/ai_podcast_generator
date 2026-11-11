@@ -74,3 +74,16 @@ export const runShow = (id) => {
   return api.post(`/shows/${id}/run`);
 };
 
+// RSS Podcast Feeds & Real-time Server-Sent Events (SSE)
+export const getShowFeedUrl = (showId) => {
+  return `${API_URL}/shows/${showId}/feed.xml`;
+};
+
+export const getGlobalFeedUrl = () => {
+  return `${API_URL}/feed.xml`;
+};
+
+export const getEpisodeEventsUrl = (episodeId) => {
+  return `${API_URL}/episodes/${episodeId}/events`;
+};
+

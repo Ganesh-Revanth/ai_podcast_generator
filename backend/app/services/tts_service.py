@@ -1,9 +1,10 @@
 import os
+import re
 import time
 import asyncio
 import logging
 import tempfile
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple, Any
 import edge_tts
 from pydub import AudioSegment
 from pydub.generators import Sine
@@ -180,15 +181,38 @@ def synthesize_turn_with_retry(
         logger.error(f"Fallback voice also failed: {e2}")
         raise last_error or e2
 
+def chunk_text_into_paragraphs(text: str, max_chunk_chars: int = 500) -> List[str]:
+    """Splits a monologue script into speakable paragraph or sentence chunks adhering to Rule 9."""
+    raw_paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+    chunks = []
+    for p in raw_paragraphs:
+        if len(p) <= max_chunk_chars:
+            chunks.append(p)
+        else:
+            sentences = re.split(r'(?<=[.!?])\s+', p)
+            current = ""
+            for s in sentences:
+                if len(current) + len(s) + 1 <= max_chunk_chars:
+                    current = f"{current} {s}".strip()
+                else:
+                    if current:
+                        chunks.append(current)
+                    current = s
+            if current:
+                chunks.append(current)
+    return chunks if chunks else [text.strip()]
+
 def stitch_dialogue_turns(
     turn_files: List[str],
     output_filepath: str,
     include_music: bool = True,
-    pause_ms: int = 400
-) -> None:
+    pause_ms: int = 400,
+    turn_metadata: Optional[List[Dict[str, str]]] = None
+) -> Tuple[int, List[Dict[str, Any]]]:
     """
     Stitches individual turn audio files into one continuous dialogue audio file,
     inserting natural pauses between turns and optionally mixing in intro/outro music.
+    Returns (duration_seconds, transcript_segments).
     """
     if not turn_files:
         raise ValueError("No turn files provided to stitch.")
@@ -196,31 +220,59 @@ def stitch_dialogue_turns(
     combined = AudioSegment.empty()
     pause = AudioSegment.silent(duration=pause_ms)
 
-    for idx, f in enumerate(turn_files):
-        if not os.path.exists(f) or os.path.getsize(f) == 0:
-            continue
-        turn_audio = AudioSegment.from_file(f)
-        if len(combined) > 0:
-            combined += pause
-        combined += turn_audio
-
-    if len(combined) == 0:
-        combined = AudioSegment.silent(duration=1000)
-
-    # Optional intro/outro music stitching
+    intro_clip = None
     if include_music:
         ensure_default_music_assets()
         intro_path = os.path.join(settings.MUSIC_STORAGE_DIR, "intro.mp3")
-        outro_path = os.path.join(settings.MUSIC_STORAGE_DIR, "outro.mp3")
-
         if os.path.exists(intro_path):
             try:
                 intro_audio = AudioSegment.from_file(intro_path)
                 intro_clip = intro_audio[:3000].fade_in(100).fade_out(1000) - 6
-                combined = intro_clip + AudioSegment.silent(duration=200) + combined
             except Exception as e:
                 logger.warning(f"Could not stitch intro music: {e}")
 
+    current_ms = 0
+    if intro_clip is not None:
+        combined = intro_clip + AudioSegment.silent(duration=200)
+        current_ms = len(combined)
+
+    segments: List[Dict[str, Any]] = []
+
+    for idx, f in enumerate(turn_files):
+        if not os.path.exists(f) or os.path.getsize(f) == 0:
+            continue
+        turn_audio = AudioSegment.from_file(f)
+        turn_len = len(turn_audio)
+
+        if idx > 0 and len(combined) > 0:
+            combined += pause
+            current_ms += pause_ms
+
+        start_sec = round(current_ms / 1000.0, 2)
+        end_sec = round((current_ms + turn_len) / 1000.0, 2)
+
+        speaker = "Host A"
+        text = ""
+        if turn_metadata and idx < len(turn_metadata):
+            speaker_code = turn_metadata[idx].get("speaker", "A").upper()
+            speaker = f"Host {speaker_code}" if speaker_code in ["A", "B"] else speaker_code
+            text = turn_metadata[idx].get("text", "")
+
+        segments.append({
+            "start": start_sec,
+            "end": end_sec,
+            "speaker": speaker,
+            "text": text
+        })
+
+        combined += turn_audio
+        current_ms += turn_len
+
+    if len(combined) == 0:
+        combined = AudioSegment.silent(duration=1000)
+
+    if include_music:
+        outro_path = os.path.join(settings.MUSIC_STORAGE_DIR, "outro.mp3")
         if os.path.exists(outro_path):
             try:
                 outro_audio = AudioSegment.from_file(outro_path)
@@ -230,6 +282,8 @@ def stitch_dialogue_turns(
                 logger.warning(f"Could not stitch outro music: {e}")
 
     combined.export(output_filepath, format="mp3", bitrate="192k")
+    total_seconds = max(1, round(len(combined) / 1000.0))
+    return total_seconds, segments
 
 def generate_dialogue_audio_from_turns(
     turns: List[Dict[str, str]],
@@ -237,10 +291,10 @@ def generate_dialogue_audio_from_turns(
     voice_a: str = "en-IN-NeerjaNeural",
     voice_b: str = "en-IN-PrabhatNeural",
     include_music: bool = True
-) -> str:
+) -> Tuple[str, int, List[Dict[str, Any]]]:
     """
     Chunked synthesis per turn with retries, stitched with natural pauses and optional intro/outro music.
-    Returns relative URL path to the saved episode audio file.
+    Returns (audio_url, duration_seconds, transcript_segments).
     """
     if not turns:
         turns = [{"speaker": "A", "text": "Welcome to today's briefing. No dialogue content was generated."}]
@@ -253,6 +307,7 @@ def generate_dialogue_audio_from_turns(
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         turn_files: List[str] = []
+        metadata: List[Dict[str, str]] = []
         for idx, turn in enumerate(turns):
             turn_speaker = turn.get("speaker", "A").upper()
             turn_voice = v_a if turn_speaker == "A" else v_b
@@ -262,41 +317,48 @@ def generate_dialogue_audio_from_turns(
             turn_filepath = os.path.join(tmp_dir, f"turn_{idx}.mp3")
             synthesize_turn_with_retry(turn_text, turn_voice, turn_filepath, max_retries=3)
             turn_files.append(turn_filepath)
+            metadata.append({"speaker": turn_speaker, "text": turn_text})
 
-        stitch_dialogue_turns(turn_files, filepath, include_music=include_music, pause_ms=400)
+        total_seconds, segments = stitch_dialogue_turns(
+            turn_files,
+            filepath,
+            include_music=include_music,
+            pause_ms=400,
+            turn_metadata=metadata
+        )
 
-    return f"/static/audio/{filename}"
+    return f"/static/audio/{filename}", total_seconds, segments
 
-def generate_audio_from_script(script: str, filename: str, voice: str = "en-US-ChristopherNeural") -> str:
+def generate_audio_from_script(
+    script: str,
+    filename: str,
+    voice: str = "en-US-ChristopherNeural"
+) -> Tuple[str, int, List[Dict[str, Any]]]:
     """
-    Converts monologue text to speech using edge-tts (free, no API key required).
-    Saves to the static/audio directory.
-    Returns the relative URL to access the audio.
+    Converts monologue text to speech using chunked Edge-TTS with retries (complying with Rule 9)
+    and stitches chunks into continuous audio with timed transcript segments.
+    Returns (audio_url, duration_seconds, transcript_segments).
     """
     filepath = os.path.join(settings.AUDIO_STORAGE_DIR, filename)
-    
-    # Validate voice or fallback
     valid_voice_ids = [v["id"] for v in VOICE_OPTIONS]
     selected_voice = voice if voice in valid_voice_ids else "en-US-ChristopherNeural"
-    
-    async def _generate():
-        communicate = edge_tts.Communicate(script, selected_voice)
-        await communicate.save(filepath)
-        
-    try:
-        asyncio.run(_generate())
-    except Exception as e:
-        logger.error(f"TTS Error generating audio with voice {selected_voice}: {e}")
-        # Try fallback default voice if custom voice failed
-        if selected_voice != "en-US-ChristopherNeural":
-            try:
-                communicate_fallback = edge_tts.Communicate(script, "en-US-ChristopherNeural")
-                asyncio.run(communicate_fallback.save(filepath))
-            except Exception as e2:
-                logger.error(f"TTS Fallback error: {e2}")
-                raise e2
-        else:
-            raise e
-        
-    # Return relative URL
-    return f"/static/audio/{filename}"
+
+    chunks = chunk_text_into_paragraphs(script)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        chunk_files = []
+        metadata = []
+        for idx, chunk in enumerate(chunks):
+            chunk_file = os.path.join(tmp_dir, f"chunk_{idx}.mp3")
+            synthesize_turn_with_retry(chunk, selected_voice, chunk_file, max_retries=3)
+            chunk_files.append(chunk_file)
+            metadata.append({"speaker": "Host", "text": chunk})
+
+        total_seconds, segments = stitch_dialogue_turns(
+            turn_files=chunk_files,
+            output_filepath=filepath,
+            include_music=False,
+            pause_ms=300,
+            turn_metadata=metadata
+        )
+
+    return f"/static/audio/{filename}", total_seconds, segments

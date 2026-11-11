@@ -5,6 +5,8 @@ import Dashboard from './pages/Dashboard';
 import Generator from './pages/Generator';
 import Player from './pages/Player';
 import Shows from './pages/Shows';
+import { AudioPlayerProvider } from './context/AudioPlayerContext';
+import BottomPlayer from './components/BottomPlayer';
 
 const Sidebar = () => {
   const location = useLocation();
@@ -56,23 +58,26 @@ const Sidebar = () => {
 function App() {
   return (
     <Router>
-      <div className="flex bg-background min-h-screen text-gray-100 font-sans selection:bg-primary/30">
-        <Sidebar />
-        <main className="flex-1 p-8 overflow-y-auto relative h-screen">
-          {/* Subtle background glow */}
-          <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary/10 rounded-full blur-[120px] pointer-events-none -z-10" />
-          <div className="absolute bottom-0 left-[20%] w-[400px] h-[400px] bg-accent/10 rounded-full blur-[120px] pointer-events-none -z-10" />
-          
-          <div className="max-w-6xl mx-auto animate-fade-in">
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/shows" element={<Shows />} />
-              <Route path="/generator" element={<Generator />} />
-              <Route path="/history" element={<Player />} />
-            </Routes>
-          </div>
-        </main>
-      </div>
+      <AudioPlayerProvider>
+        <div className="flex bg-background min-h-screen text-gray-100 font-sans selection:bg-primary/30 relative">
+          <Sidebar />
+          <main className="flex-1 p-8 pb-32 overflow-y-auto relative h-screen">
+            {/* Subtle background glow */}
+            <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary/10 rounded-full blur-[120px] pointer-events-none -z-10" />
+            <div className="absolute bottom-0 left-[20%] w-[400px] h-[400px] bg-accent/10 rounded-full blur-[120px] pointer-events-none -z-10" />
+            
+            <div className="max-w-6xl mx-auto animate-fade-in">
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/shows" element={<Shows />} />
+                <Route path="/generator" element={<Generator />} />
+                <Route path="/history" element={<Player />} />
+              </Routes>
+            </div>
+          </main>
+          <BottomPlayer />
+        </div>
+      </AudioPlayerProvider>
     </Router>
   );
 }

@@ -71,6 +71,10 @@ The frontend will be available at `http://localhost:5173`.
 ## Features
 - **Monologue & Dialogue Formats**: Choose between a solo news anchor or an engaging two-host conversational discussion with strict JSON dialogue generation.
 - **Dual-Host Audio Synthesis & Stitching**: High quality dual voice acting with Edge-TTS, 400ms natural transitions, retry backoff, and intro/outro music branding.
+- **Persistent Bottom Audio Player & Queue**: Global audio player supporting play/pause, scrub slider, skip ±15s, playback speed controls (0.75x–2x), countdown sleep timer, and an up-next playback queue.
+- **Synchronized Transcript Highlighting**: Real-time transcript tracker calculating millisecond turn boundaries; highlights the active spoken line in sync with playback and enables 1-click seeking.
+- **Server-Sent Events (SSE) Pipeline Stepper**: Real-time progress updates (`fetching` → `ranking` → `scripting` → `voicing` → `mixing` → `done`/`failed`) streaming over SSE without client-side polling.
+- **Apple Podcasts / RSS 2.0 Feeds**: Standard-compliant XML podcast feeds (`/api/shows/{id}/feed.xml` and `/api/feed.xml`) with `<enclosure>` audio tags, durations, RFC 822 timestamps, and rich HTML show notes for native podcast app subscription.
 - **Smart News Pipeline**: Full article text extraction with `trafilatura` (with fallback to feed summaries), cross-outlet deduplication of near-identical stories, and topic clustering into distinct episode segments.
 - **Automated Fact-Checking & Show Notes**: Secondary LLM fact-checking pass comparing script claims against verified source texts, with interactive Show Notes and fact-check audits on the Player page.
 - **Recurring Shows & Automation**: Create automated shows tied to specific news outlets and categories with APScheduler background jobs (daily, hourly, or cron).
@@ -82,6 +86,13 @@ The frontend will be available at `http://localhost:5173`.
   - `news_service.py`: Fetches RSS feeds and extracts full article text via `trafilatura` (with safe fallback).
   - `curation_service.py`: Cross-outlet deduplication and topic clustering to group multi-source stories into cohesive script segments.
   - `ai_service.py`: Generates monologue and strict JSON dialogue scripts with dynamic length budgets, and conducts automated fact-check audits.
-  - `tts_service.py`: Converts text to audio via Edge-TTS and stitches dialogue turns and music branding with `pydub`.
+  - `tts_service.py`: Converts text to audio via Edge-TTS and stitches dialogue turns, pauses, and musical branding with `pydub`, calculating exact transcript timestamps.
+  - `event_service.py`: Manages in-memory pub-sub queues broadcasting real-time pipeline events over Server-Sent Events (`text/event-stream`).
+  - `feed_service.py`: Generates Apple Podcasts and RSS 2.0 XML feeds with enclosure tags and HTML show notes.
   - `scheduler_service.py`: Manages automated episode generation with `APScheduler`.
-- **Frontend Layout**: Modern sidebar layout (`App.jsx`) with dynamic glowing backgrounds, glass-morphism panels, and Tailwind animations covering Dashboard, Generator Studio, Shows Automation, and Player Library.
+- **Frontend Architecture**:
+  - `AudioPlayerContext.jsx`: Global audio state provider powering persistent playback across page transitions.
+  - `BottomPlayer.jsx`: Persistent glass-panel dock with scrubber, skip buttons, speed selector, sleep timer, queue drawer, and transcript toggle.
+  - `SynchronizedTranscript.jsx`: Live transcript viewer with real-time turn highlighting and click-to-seek playback.
+  - `PipelineStepper.jsx`: SSE-powered animated progress stepper showing real-time pipeline stages.
+  - Responsive glassmorphism panels and Tailwind animations across Dashboard, Generator Studio, Shows Automation, and Player Library.

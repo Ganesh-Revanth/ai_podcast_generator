@@ -1,7 +1,9 @@
+import asyncio
 import datetime
 import json
 import logging
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Request, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -10,6 +12,8 @@ from app.db import models
 from app.schemas import schemas
 from app.services.news_service import fetch_and_store_news, get_available_sources, fetch_articles_from_source, NEWS_SOURCES
 from app.services.curation_service import deduplicate_articles, cluster_articles_by_topic
+from app.services.event_service import pipeline_events
+from app.services.feed_service import build_show_rss_feed, build_global_rss_feed
 from app.services.ai_service import (
     generate_podcast_script,
     generate_podcast_script_from_text,
@@ -89,11 +93,13 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
 
         # Mode 1: Direct Text Input
         if request.source_mode == "text" or (request.article_text and request.article_text.strip()):
+            pipeline_events.publish(episode_id, stage="fetching", progress=15, message="Processing custom article text...")
             article_content = request.article_text.strip() if request.article_text else ""
             if not article_content:
                 episode.status = "failed"
                 episode.error_message = "No article text provided."
                 db.commit()
+                pipeline_events.publish(episode_id, stage="failed", progress=0, message=episode.error_message)
                 return
 
             # Store as custom article record for history
@@ -112,6 +118,7 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
             episode.articles.append(custom_article)
             db.commit()
 
+            pipeline_events.publish(episode_id, stage="scripting", progress=50, message="Drafting podcast script with LLM...")
             # Generate Script via AI from raw text
             if is_dialogue:
                 dialogue_turns = generate_podcast_dialogue_from_text(
@@ -137,6 +144,13 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
             category_id = request.category or "national"
             num_stories = request.num_stories if (request.num_stories and request.num_stories > 0) else calculate_story_count(target_minutes)
             
+            pipeline_events.publish(
+                episode_id,
+                stage="fetching",
+                progress=15,
+                message=f"Fetching latest news from {source_id} ({category_id})..."
+            )
+
             # Fetch live articles dynamically from the chosen outlet
             articles = fetch_articles_from_source(
                 source_id=source_id,
@@ -149,8 +163,16 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
                 episode.status = "failed"
                 episode.error_message = f"No articles found for channel '{source_id}' and category '{category_id}'."
                 db.commit()
+                pipeline_events.publish(episode_id, stage="failed", progress=0, message=episode.error_message)
                 logger.warning(f"Episode {episode_id} failed: {episode.error_message}")
                 return
+
+            pipeline_events.publish(
+                episode_id,
+                stage="ranking",
+                progress=35,
+                message=f"Deduplicating {len(articles)} articles and clustering into topic segments..."
+            )
 
             # Deduplicate near-identical stories across outlets
             articles = deduplicate_articles(articles)
@@ -163,6 +185,13 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
                 if article not in episode.articles:
                     episode.articles.append(article)
             db.commit()
+
+            pipeline_events.publish(
+                episode_id,
+                stage="scripting",
+                progress=55,
+                message="Drafting podcast script and performing fact-check..."
+            )
 
             # Generate Script via AI from fetched live articles organized by clusters
             if is_dialogue:
@@ -187,6 +216,7 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
             episode.status = "failed"
             episode.error_message = "Invalid generation mode or source configuration."
             db.commit()
+            pipeline_events.publish(episode_id, stage="failed", progress=0, message=episode.error_message)
             return
 
         episode.script = script
@@ -195,7 +225,7 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
 
         # Fact-Check Step: verify generated script claims against source articles
         try:
-            source_docs = articles if (request.source_mode in ["channel", "rss"] or request.source_id) else episode.articles
+            source_docs = episode.articles
             fc_status, fc_flags = fact_check_script(script, source_docs)
             episode.fact_check_status = fc_status
             episode.fact_check_flags = json.dumps(fc_flags) if fc_flags else None
@@ -208,10 +238,13 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
 
         # 3. Generate Audio via TTS
         audio_filename = f"episode_{episode.id}.mp3"
+        pipeline_events.publish(episode_id, stage="voicing", progress=75, message="Synthesizing audio voice tracks with Edge-TTS...")
+
         if is_dialogue:
             voice_a = request.voice_a or "en-IN-NeerjaNeural"
             voice_b = request.voice_b or "en-IN-PrabhatNeural"
-            audio_url = generate_dialogue_audio_from_turns(
+            pipeline_events.publish(episode_id, stage="mixing", progress=85, message="Stitching dialogue turns, pauses, and musical branding...")
+            audio_url, duration_seconds, segments = generate_dialogue_audio_from_turns(
                 turns=dialogue_turns,
                 filename=audio_filename,
                 voice_a=voice_a,
@@ -219,11 +252,25 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
                 include_music=request.include_music
             )
         else:
-            audio_url = generate_audio_from_script(script, audio_filename, voice=voice)
+            pipeline_events.publish(episode_id, stage="mixing", progress=85, message="Stitching monologue audio and calculating timestamps...")
+            audio_url, duration_seconds, segments = generate_audio_from_script(script, audio_filename, voice=voice)
         
         episode.audio_url = audio_url
+        episode.duration_seconds = duration_seconds
+        episode.transcript_segments = json.dumps(segments) if segments else None
         episode.status = "completed"
         db.commit()
+
+        pipeline_events.publish(
+            episode_id,
+            stage="done",
+            progress=100,
+            message="Episode generation complete!",
+            payload={
+                "audio_url": audio_url,
+                "duration_seconds": duration_seconds
+            }
+        )
 
         # Update Show last_run_at if tied to a show
         if episode.show_id:
@@ -239,6 +286,13 @@ def episode_generation_pipeline(episode_id: int, request: schemas.EpisodeGenerat
             episode.status = "failed"
             episode.error_message = str(e)
             db.commit()
+            pipeline_events.publish(
+                episode_id,
+                stage="failed",
+                progress=0,
+                message=str(e),
+                payload={"error_message": str(e)}
+            )
     finally:
         db.close()
 
@@ -428,5 +482,109 @@ def run_show_now(show_id: int, background_tasks: BackgroundTasks, db: Session = 
     background_tasks.add_task(episode_generation_pipeline, new_episode.id, gen_request)
 
     return new_episode
+
+@router.get("/episodes/{episode_id}/events")
+async def get_episode_pipeline_events(episode_id: int, db: Session = Depends(get_db)):
+    """
+    Server-Sent Events (SSE) endpoint streaming real-time pipeline progress updates.
+    Reports stages: fetching, ranking, scripting, voicing, mixing, done, or failed.
+    """
+    episode = db.query(models.Episode).filter(models.Episode.id == episode_id).first()
+    if not episode:
+        raise HTTPException(status_code=404, detail="Episode not found")
+
+    async def event_generator():
+        # Terminal state check: if episode is already completed or failed, emit immediately and finish
+        if episode.status == "completed":
+            terminal_event = {
+                "episode_id": episode_id,
+                "stage": "done",
+                "progress": 100,
+                "message": "Episode generation completed.",
+                "payload": {
+                    "audio_url": episode.audio_url,
+                    "duration_seconds": episode.duration_seconds
+                }
+            }
+            yield f"data: {json.dumps(terminal_event)}\n\n"
+            return
+        elif episode.status == "failed":
+            terminal_event = {
+                "episode_id": episode_id,
+                "stage": "failed",
+                "progress": 0,
+                "message": episode.error_message or "Episode generation failed.",
+                "payload": {"error_message": episode.error_message}
+            }
+            yield f"data: {json.dumps(terminal_event)}\n\n"
+            return
+
+        # Replay latest event if one exists
+        latest = pipeline_events.get_latest_event(episode_id)
+        if latest:
+            yield f"data: {json.dumps(latest)}\n\n"
+
+        queue = pipeline_events.subscribe(episode_id)
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=20.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                    if event.get("stage") in ["done", "failed"]:
+                        break
+                except asyncio.TimeoutError:
+                    # Keep-alive SSE comment
+                    yield ": ping\n\n"
+        finally:
+            pipeline_events.unsubscribe(episode_id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+@router.get("/shows/{show_id}/feed.xml")
+def get_show_podcast_feed(show_id: int, request: Request, db: Session = Depends(get_db)):
+    """
+    Returns an Apple Podcasts-compliant RSS 2.0 XML feed with enclosure tags,
+    durations, and show notes for a specific Show.
+    """
+    show = db.query(models.Show).filter(models.Show.id == show_id).first()
+    if not show:
+        raise HTTPException(status_code=404, detail=f"Show with id {show_id} not found")
+
+    episodes = (
+        db.query(models.Episode)
+        .filter(models.Episode.show_id == show_id)
+        .order_by(models.Episode.created_at.desc())
+        .all()
+    )
+
+    base_url = str(request.base_url).rstrip("/")
+    xml_content = build_show_rss_feed(show=show, episodes=episodes, base_url=base_url)
+    return Response(content=xml_content, media_type="application/xml; charset=utf-8")
+
+@router.get("/feed.xml")
+def get_global_podcast_feed(request: Request, db: Session = Depends(get_db)):
+    """
+    Returns an Apple Podcasts-compliant global RSS 2.0 XML feed containing
+    all completed episodes across all shows and standalone briefings.
+    """
+    episodes = (
+        db.query(models.Episode)
+        .order_by(models.Episode.created_at.desc())
+        .limit(50)
+        .all()
+    )
+
+    base_url = str(request.base_url).rstrip("/")
+    xml_content = build_global_rss_feed(episodes=episodes, base_url=base_url)
+    return Response(content=xml_content, media_type="application/xml; charset=utf-8")
+
 
 

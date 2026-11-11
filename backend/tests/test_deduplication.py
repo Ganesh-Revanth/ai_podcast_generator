@@ -69,3 +69,4 @@ def test_deduplicate_articles():
     # art2 has longer content, so it should be retained over art1
     assert art2.title in titles
     assert art1.title not in titles
+

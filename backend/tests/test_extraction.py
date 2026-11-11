@@ -24,3 +24,4 @@ def test_extract_full_article_text_custom_scheme():
     # custom:// URLs should immediately use fallback without network fetch
     result = extract_full_article_text("custom://episode/123", fallback_html="Direct custom text.")
     assert result == "Direct custom text."
+
